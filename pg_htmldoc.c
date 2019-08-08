@@ -16,14 +16,13 @@ EXTENSION(pg_htmldoc) {
     html = DatumGetTextP(PG_GETARG_DATUM(0));
     if (!(in = fmemopen(VARDATA_ANY(html), VARSIZE_ANY_EXHDR(html), "rb"))) ereport(ERROR, (errmsg("!in")));
     if (!(out = open_memstream(&output_data, &output_len))) ereport(ERROR, (errmsg("!out")));
-    set_out(out);
     htmlSetCharSet("utf-8");
     if (!(document = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errmsg("!document")));
     htmlSetVariable(document, (uchar *)"_HD_FILENAME", (uchar *)"");
     htmlSetVariable(document, (uchar *)"_HD_BASE", (uchar *)".");
     htmlReadFile2(document, in, ".");
     htmlFixLinks(document, document, 0);
-    pspdf_export(document, NULL);
+    pspdf_export_out(document, NULL, out);
     htmlDeleteTree(document);
     file_cleanup();
     image_flush_cache();
