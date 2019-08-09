@@ -21,14 +21,13 @@ EXTENSION(htmldoc) {
     text *pdf;
     char *output_data = NULL;
     size_t output_len = 0;
-    FILE *out;
+    FILE *in, *out;
     tree_t *document;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errmsg("data is null!")));
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     htmlSetCharSet("utf-8");
     if (!(document = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errmsg("!document")));
     if (input_type == INPUT_TYPE_HTML) {
-        FILE *in;
         text *html = DatumGetTextP(PG_GETARG_DATUM(0));
         htmlSetVariable(document, (uchar *)"_HD_FILENAME", (uchar *)"");
         htmlSetVariable(document, (uchar *)"_HD_BASE", (uchar *)".");
@@ -37,16 +36,16 @@ EXTENSION(htmldoc) {
         fclose(in);
         pfree(html);
     } else if (input_type == INPUT_TYPE_URL) {
-        const char *realname;
-        FILE *fp;
         char *url = TextDatumGetCString(PG_GETARG_DATUM(0));
+        const char *realname = file_find(NULL, url);
         char *base = pstrdup(file_directory(url));
-        if (!(realname = file_find(NULL, url))) ereport(ERROR, (errmsg("!realname")));
-        if (!(fp = fopen(realname, "rb"))) ereport(ERROR, (errmsg("!fp")));
+        if (!realname) ereport(ERROR, (errmsg("!realname")));
+        if (!(in = fopen(realname, "rb"))) ereport(ERROR, (errmsg("!in")));
         htmlSetVariable(document, (uchar *)"_HD_URL", (uchar *)url);
         htmlSetVariable(document, (uchar *)"_HD_FILENAME", (uchar *)file_basename(url));
         htmlSetVariable(document, (uchar *)"_HD_BASE", (uchar *)base);
-        htmlReadFile2(document, fp, base);
+        htmlReadFile2(document, in, base);
+        fclose(in);
         pfree(url);
         pfree(base);
     }
