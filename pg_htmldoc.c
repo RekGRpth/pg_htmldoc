@@ -3,10 +3,11 @@
 #include "htmldoc.h"
 
 #define EXTENSION(function) Datum (function)(PG_FUNCTION_ARGS); PG_FUNCTION_INFO_V1(function); Datum (function)(PG_FUNCTION_ARGS)
+#define DATUM(function) Datum (function)(PG_FUNCTION_ARGS); Datum (function)(PG_FUNCTION_ARGS)
 
 PG_MODULE_MAGIC;
 
-EXTENSION(pg_htmldoc) {
+EXTENSION(htmldoc) {
     text *html, *pdf;
     char *output_data = NULL;
     size_t output_len = 0;
@@ -31,4 +32,14 @@ EXTENSION(pg_htmldoc) {
     pdf = cstring_to_text_with_len(output_data, output_len);
     free(output_data);
     PG_RETURN_TEXT_P(pdf);
+}
+
+EXTENSION(html2pdf) {
+    PSLevel = 0;
+    return htmldoc(fcinfo);
+}
+
+EXTENSION(html2ps) {
+    PSLevel = 3;
+    return htmldoc(fcinfo);
 }
