@@ -3,21 +3,20 @@
 #include "htmldoc.h"
 
 #define EXTENSION(function) Datum (function)(PG_FUNCTION_ARGS); PG_FUNCTION_INFO_V1(function); Datum (function)(PG_FUNCTION_ARGS)
-#define DATUM(function) Datum (function)(PG_FUNCTION_ARGS); Datum (function)(PG_FUNCTION_ARGS)
 
-enum {
+typedef enum {
     INPUT_TYPE_HTML = 0,
     INPUT_TYPE_URL
-} input_type;
+} input_type_t;
 
-enum {
+typedef enum {
     OUTPUT_TYPE_PDF = 0,
     OUTPUT_TYPE_PS
-} output_type;
+} output_type_t;
 
 PG_MODULE_MAGIC;
 
-EXTENSION(htmldoc) {
+static Datum htmldoc(PG_FUNCTION_ARGS, input_type_t input_type, output_type_t output_type) {
     text *pdf;
     char *output_data = NULL;
     size_t output_len = 0;
@@ -65,25 +64,17 @@ EXTENSION(htmldoc) {
 }
 
 EXTENSION(html2pdf) {
-    input_type = INPUT_TYPE_HTML;
-    output_type = OUTPUT_TYPE_PDF;
-    return htmldoc(fcinfo);
+    return htmldoc(fcinfo, INPUT_TYPE_HTML, OUTPUT_TYPE_PDF);
 }
 
 EXTENSION(html2ps) {
-    input_type = INPUT_TYPE_HTML;
-    output_type = OUTPUT_TYPE_PS;
-    return htmldoc(fcinfo);
+    return htmldoc(fcinfo, INPUT_TYPE_HTML, OUTPUT_TYPE_PS);
 }
 
 EXTENSION(url2pdf) {
-    input_type = INPUT_TYPE_URL;
-    output_type = OUTPUT_TYPE_PDF;
-    return htmldoc(fcinfo);
+    return htmldoc(fcinfo, INPUT_TYPE_URL, OUTPUT_TYPE_PDF);
 }
 
 EXTENSION(url2ps) {
-    input_type = INPUT_TYPE_URL;
-    output_type = OUTPUT_TYPE_PS;
-    return htmldoc(fcinfo);
+    return htmldoc(fcinfo, INPUT_TYPE_URL, OUTPUT_TYPE_PS);
 }
