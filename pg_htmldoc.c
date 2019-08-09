@@ -38,7 +38,7 @@ EXTENSION(htmldoc) {
     } else if (input_type == INPUT_TYPE_URL) {
         char *url = TextDatumGetCString(PG_GETARG_DATUM(0));
         const char *realname = file_find(NULL, url);
-        char *base = pstrdup(file_directory(url));
+        const char *base = file_directory(url);
         if (!realname) ereport(ERROR, (errmsg("!realname")));
         if (!(in = fopen(realname, "rb"))) ereport(ERROR, (errmsg("!in")));
         htmlSetVariable(document, (uchar *)"_HD_URL", (uchar *)url);
@@ -47,7 +47,6 @@ EXTENSION(htmldoc) {
         htmlReadFile2(document, in, base);
         fclose(in);
         pfree(url);
-        pfree(base);
     }
     htmlFixLinks(document, document, 0);
     if (output_type == OUTPUT_TYPE_PDF) {
