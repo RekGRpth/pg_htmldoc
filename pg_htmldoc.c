@@ -28,19 +28,19 @@ static void read_fileurl(const char *fileurl, tree_t **document, const char *pat
     FILE *in;
     const char *realname = file_find(path, fileurl);
     const char *base = file_directory(fileurl);
-    if (!realname) ereport(ERROR, (errmsg("!realname")));
-    if (!(in = fopen(realname, "rb"))) ereport(ERROR, (errmsg("!in")));
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errmsg("!file")));
     htmlSetVariable(file, (uchar *)"_HD_URL", (uchar *)fileurl);
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)file_basename(fileurl));
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)base);
+    if (!realname) ereport(ERROR, (errmsg("!realname")));
+    if (!(in = fopen(realname, "rb"))) ereport(ERROR, (errmsg("!in")));
     htmlReadFile2(file, in, base);
+    fclose(in);
     if (*document == NULL) *document = file; else {
         while ((*document)->next != NULL) *document = (*document)->next;
         (*document)->next = file;
         file->prev = *document;
     }
-    fclose(in);
 }
 
 static void read_html(char *html, size_t len, tree_t **document) {
@@ -51,12 +51,12 @@ static void read_html(char *html, size_t len, tree_t **document) {
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)".");
     if (!(in = fmemopen(html, len, "rb"))) ereport(ERROR, (errmsg("!in")));
     htmlReadFile2(file, in, ".");
+    fclose(in);
     if (*document == NULL) *document = file; else {
         while ((*document)->next != NULL) *document = (*document)->next;
         (*document)->next = file;
         file->prev = *document;
     }
-    fclose(in);
 }
 
 static Datum htmldoc(PG_FUNCTION_ARGS, data_type_t data_type, input_type_t input_type, output_type_t output_type) {
