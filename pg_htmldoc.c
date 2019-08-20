@@ -11,7 +11,8 @@ typedef enum {
 } data_type_t;
 
 typedef enum {
-    INPUT_TYPE_HTML = 0,
+    INPUT_TYPE_FILE = 0,
+    INPUT_TYPE_HTML,
     INPUT_TYPE_URL
 } input_type_t;
 
@@ -34,7 +35,44 @@ static Datum htmldoc(PG_FUNCTION_ARGS, data_type_t data_type, input_type_t input
     if (PG_ARGISNULL(0)) ereport(ERROR, (errmsg("data is null!")));
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     htmlSetCharSet("utf-8");
-    if (input_type == INPUT_TYPE_HTML) {
+    if (input_type == INPUT_TYPE_FILE) {
+        if (data_type == DATA_TYPE_ARRAY) {
+            if (array_contains_nulls(DatumGetArrayTypeP(PG_GETARG_DATUM(0)))) ereport(ERROR, (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("array_contains_nulls")));
+            deconstruct_array(DatumGetArrayTypeP(PG_GETARG_DATUM(0)), TEXTOID, -1, false, 'i', &elemsp, &nullsp, &nelemsp);
+            for (int i = 0; i < nelemsp; i++) {
+                char *name = TextDatumGetCString(elemsp[i]);
+                const char *realname = file_find(Path, name);
+                const char *base = file_directory(name);
+                if (!realname) ereport(ERROR, (errmsg("!realname")));
+                if (!(in = fopen(realname, "rb"))) ereport(ERROR, (errmsg("!in")));
+                if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errmsg("!file")));
+                htmlSetVariable(file, (uchar *)"_HD_URL", (uchar *)name);
+                htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)file_basename(name));
+                htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)base);
+                htmlReadFile2(file, in, base);
+                if (document == NULL) document = file; else {
+                    while (document->next != NULL) document = document->next;
+                    document->next = file;
+                    file->prev = document;
+                }
+                fclose(in);
+                //pfree(name);
+            }
+        } else {
+            char *name = TextDatumGetCString(PG_GETARG_DATUM(0));
+            const char *realname = file_find(Path, name);
+            const char *base = file_directory(name);
+            if (!realname) ereport(ERROR, (errmsg("!realname")));
+            if (!(in = fopen(realname, "rb"))) ereport(ERROR, (errmsg("!in")));
+            if (!(document = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errmsg("!document")));
+            htmlSetVariable(document, (uchar *)"_HD_URL", (uchar *)name);
+            htmlSetVariable(document, (uchar *)"_HD_FILENAME", (uchar *)file_basename(name));
+            htmlSetVariable(document, (uchar *)"_HD_BASE", (uchar *)base);
+            htmlReadFile2(document, in, base);
+            fclose(in);
+            pfree(name);
+        }
+    } else if (input_type == INPUT_TYPE_HTML) {
         if (data_type == DATA_TYPE_ARRAY) {
             if (array_contains_nulls(DatumGetArrayTypeP(PG_GETARG_DATUM(0)))) ereport(ERROR, (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("array_contains_nulls")));
             deconstruct_array(DatumGetArrayTypeP(PG_GETARG_DATUM(0)), TEXTOID, -1, false, 'i', &elemsp, &nullsp, &nelemsp);
@@ -129,12 +167,17 @@ static Datum htmldoc(PG_FUNCTION_ARGS, data_type_t data_type, input_type_t input
     }
 }
 
+EXTENSION(file2pdf) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_FILE, OUTPUT_TYPE_PDF); }
+EXTENSION(file2ps) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_FILE, OUTPUT_TYPE_PS); }
+EXTENSION(file2pdf_array) { return htmldoc(fcinfo, DATA_TYPE_ARRAY, INPUT_TYPE_FILE, OUTPUT_TYPE_PDF); }
+EXTENSION(file2ps_array) { return htmldoc(fcinfo, DATA_TYPE_ARRAY, INPUT_TYPE_FILE, OUTPUT_TYPE_PS); }
+
 EXTENSION(html2pdf) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_HTML, OUTPUT_TYPE_PDF); }
 EXTENSION(html2ps) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_HTML, OUTPUT_TYPE_PS); }
-EXTENSION(url2pdf) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_URL, OUTPUT_TYPE_PDF); }
-EXTENSION(url2ps) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_URL, OUTPUT_TYPE_PS); }
-
 EXTENSION(html2pdf_array) { return htmldoc(fcinfo, DATA_TYPE_ARRAY, INPUT_TYPE_HTML, OUTPUT_TYPE_PDF); }
 EXTENSION(html2ps_array) { return htmldoc(fcinfo, DATA_TYPE_ARRAY, INPUT_TYPE_HTML, OUTPUT_TYPE_PS); }
+
+EXTENSION(url2pdf) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_URL, OUTPUT_TYPE_PDF); }
+EXTENSION(url2ps) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_URL, OUTPUT_TYPE_PS); }
 EXTENSION(url2pdf_array) { return htmldoc(fcinfo, DATA_TYPE_ARRAY, INPUT_TYPE_URL, OUTPUT_TYPE_PDF); }
 EXTENSION(url2ps_array) { return htmldoc(fcinfo, DATA_TYPE_ARRAY, INPUT_TYPE_URL, OUTPUT_TYPE_PS); }
