@@ -53,14 +53,26 @@ static Datum htmldoc(PG_FUNCTION_ARGS, input_type_t input_type, output_type_t ou
     } else if (output_type == OUTPUT_TYPE_PS) {
         PSLevel = 3;
     }
-    if (!(out = open_memstream(&output_data, &output_len))) ereport(ERROR, (errmsg("!out")));
+    if (PG_NARGS() == 1) {
+        if (!(out = open_memstream(&output_data, &output_len))) ereport(ERROR, (errmsg("!out")));
+    } else {
+        char *file;
+        if (PG_ARGISNULL(1)) ereport(ERROR, (errmsg("our is null!")));
+        file = TextDatumGetCString(PG_GETARG_DATUM(1));
+        if (!(out = fopen(file, "wb"))) ereport(ERROR, (errmsg("!out")));
+        pfree(file);
+    }
     pspdf_export_out(document, NULL, out);
     htmlDeleteTree(document);
     file_cleanup();
     image_flush_cache();
-    pdf = cstring_to_text_with_len(output_data, output_len);
-    free(output_data);
-    PG_RETURN_TEXT_P(pdf);
+    if (PG_NARGS() == 1) {
+        pdf = cstring_to_text_with_len(output_data, output_len);
+        free(output_data);
+        PG_RETURN_TEXT_P(pdf);
+    } else {
+        PG_RETURN_BOOL(true);
+    }
 }
 
 EXTENSION(html2pdf) {
