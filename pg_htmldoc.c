@@ -107,6 +107,7 @@ static Datum htmldoc(PG_FUNCTION_ARGS, data_type_t data_type, input_type_t input
             } break;
         } break;
     }
+    while (document && document->prev) document = document->prev;
     htmlFixLinks(document, document, 0);
     switch (output_type) {
         case OUTPUT_TYPE_PDF: PSLevel = 0; break;
