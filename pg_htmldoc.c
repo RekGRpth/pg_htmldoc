@@ -30,6 +30,7 @@ static void read_fileurl(const char *fileurl, tree_t **document, const char *pat
     FILE *in;
     const char *realname = file_find(path, fileurl);
     const char *base = file_directory(fileurl);
+    _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errmsg("!file")));
     htmlSetVariable(file, (uchar *)"_HD_URL", (uchar *)fileurl);
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)file_basename(fileurl));
@@ -48,6 +49,7 @@ static void read_fileurl(const char *fileurl, tree_t **document, const char *pat
 static void read_html(char *html, size_t len, tree_t **document) {
     tree_t *file;
     FILE *in;
+    _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errmsg("!file")));
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)"");
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)".");
@@ -71,7 +73,6 @@ static Datum htmldoc(PG_FUNCTION_ARGS, data_type_t data_type, input_type_t input
     FILE *out;
     tree_t *document = NULL;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errmsg("data is null!")));
-    _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     htmlSetCharSet("utf-8");
     switch (input_type) {
         case INPUT_TYPE_FILE: switch (data_type) {
