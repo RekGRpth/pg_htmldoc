@@ -73,7 +73,6 @@ static Datum htmldoc(PG_FUNCTION_ARGS, data_type_t data_type, input_type_t input
     FILE *out;
     tree_t *document = NULL;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errmsg("data is null!")));
-    htmlSetCharSet("utf-8");
     switch (input_type) {
         case INPUT_TYPE_FILE: switch (data_type) {
             case DATA_TYPE_TEXT: read_fileurl(TextDatumGetCString(PG_GETARG_DATUM(0)), &document, Path); break;
