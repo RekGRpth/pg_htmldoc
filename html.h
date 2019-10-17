@@ -148,8 +148,9 @@ typedef struct tree_str
   var_t			*vars;		/* Variables... */
 } tree_t;
 
-extern double		_htmlPPI;
-extern double		_htmlBrowserWidth;
+extern float		_htmlPPI;
+extern float		_htmlBrowserWidth;
+extern int		_htmlInitialized;
 
 tree_t	*htmlReadFile2(tree_t *parent, FILE *fp, const char *base);
 tree_t	*htmlAddTree(tree_t *parent, markup_t markup, uchar *data);
