@@ -14,7 +14,7 @@ typedef enum {
 
 typedef enum {
     INPUT_TYPE_FILE = 0,
-    INPUT_TYPE_TEXT,
+    INPUT_TYPE_HTML,
     INPUT_TYPE_URL
 } input_type_t;
 
@@ -83,7 +83,7 @@ static Datum htmldoc(PG_FUNCTION_ARGS, data_type_t data_type, input_type_t input
                 for (int i = 0; i < nelemsp; i++) read_fileurl(TextDatumGetCString(elemsp[i]), &document, Path);
             } break;
         } break;
-        case INPUT_TYPE_TEXT: switch (data_type) {
+        case INPUT_TYPE_HTML: switch (data_type) {
             case DATA_TYPE_TEXT: {
                 text *html = DatumGetTextP(PG_GETARG_DATUM(0));
                 read_html(VARDATA_ANY(html), VARSIZE_ANY_EXHDR(html), &document);
@@ -142,10 +142,10 @@ EXTENSION(file2ps) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_FILE, OUT
 EXTENSION(file2pdf_array) { return htmldoc(fcinfo, DATA_TYPE_ARRAY, INPUT_TYPE_FILE, OUTPUT_TYPE_PDF); }
 EXTENSION(file2ps_array) { return htmldoc(fcinfo, DATA_TYPE_ARRAY, INPUT_TYPE_FILE, OUTPUT_TYPE_PS); }
 
-EXTENSION(text2pdf) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_TEXT, OUTPUT_TYPE_PDF); }
-EXTENSION(text2ps) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_TEXT, OUTPUT_TYPE_PS); }
-EXTENSION(text2pdf_array) { return htmldoc(fcinfo, DATA_TYPE_ARRAY, INPUT_TYPE_TEXT, OUTPUT_TYPE_PDF); }
-EXTENSION(text2ps_array) { return htmldoc(fcinfo, DATA_TYPE_ARRAY, INPUT_TYPE_TEXT, OUTPUT_TYPE_PS); }
+EXTENSION(html2pdf) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_HTML, OUTPUT_TYPE_PDF); }
+EXTENSION(html2ps) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_HTML, OUTPUT_TYPE_PS); }
+EXTENSION(html2pdf_array) { return htmldoc(fcinfo, DATA_TYPE_ARRAY, INPUT_TYPE_HTML, OUTPUT_TYPE_PDF); }
+EXTENSION(html2ps_array) { return htmldoc(fcinfo, DATA_TYPE_ARRAY, INPUT_TYPE_HTML, OUTPUT_TYPE_PS); }
 
 EXTENSION(url2pdf) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_URL, OUTPUT_TYPE_PDF); }
 EXTENSION(url2ps) { return htmldoc(fcinfo, DATA_TYPE_TEXT, INPUT_TYPE_URL, OUTPUT_TYPE_PS); }
