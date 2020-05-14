@@ -87,7 +87,6 @@ static Datum htmldoc(PG_FUNCTION_ARGS, data_type_t data_type, input_type_t input
             case DATA_TYPE_TEXT: {
                 text *html = DatumGetTextP(PG_GETARG_DATUM(0));
                 read_html(VARDATA_ANY(html), VARSIZE_ANY_EXHDR(html), &document);
-                pfree(html);
             } break;
             case DATA_TYPE_ARRAY: {
                 if (array_contains_nulls(DatumGetArrayTypeP(PG_GETARG_DATUM(0)))) ereport(ERROR, (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("array_contains_nulls")));
