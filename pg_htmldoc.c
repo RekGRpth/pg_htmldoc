@@ -63,12 +63,12 @@ static void read_fileurl(const char *fileurl, tree_t **document, const char *pat
     const char *realname = file_find(path, fileurl);
     const char *base = file_directory(fileurl);
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
-    if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) E("!file");
+    if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) E("!htmlAddTree");
     htmlSetVariable(file, (uchar *)"_HD_URL", (uchar *)fileurl);
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)file_basename(fileurl));
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)base);
-    if (!realname) E("!realname");
-    if (!(in = fopen(realname, "rb"))) E("!in");
+    if (!realname) E("!file_find(\"%s\", \"%s\")", path, fileurl);
+    if (!(in = fopen(realname, "rb"))) E("!fopen(\"%s\")", realname);
     htmlReadFile2(file, in, base);
     fclose(in);
     if (*document == NULL) *document = file; else {
@@ -82,10 +82,10 @@ static void read_html(char *html, size_t len, tree_t **document) {
     tree_t *file;
     FILE *in;
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
-    if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) E("!file");
+    if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) E("!htmlAddTree");
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)"");
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)".");
-    if (!(in = fmemopen(html, len, "rb"))) E("!in");
+    if (!(in = fmemopen(html, len, "rb"))) E("!fmemopen");
     htmlReadFile2(file, in, ".");
     fclose(in);
     if (*document == NULL) *document = file; else {
@@ -145,12 +145,12 @@ static Datum htmldoc(PG_FUNCTION_ARGS, data_type_t data_type, input_type_t input
         case OUTPUT_TYPE_PS: PSLevel = 3; break;
     }
     switch (PG_NARGS()) {
-        case 1: if (!(out = open_memstream(&output_data, &output_len))) E("!out"); break;
+        case 1: if (!(out = open_memstream(&output_data, &output_len))) E("!open_memstream"); break;
         default: {
             char *file;
             if (PG_ARGISNULL(1)) E("our is null!");
             file = TextDatumGetCString(PG_GETARG_DATUM(1));
-            if (!(out = fopen(file, "wb"))) E("!out");
+            if (!(out = fopen(file, "wb"))) E("!fopen(\"%s\")", file);
             pfree(file);
         } break;
     }
