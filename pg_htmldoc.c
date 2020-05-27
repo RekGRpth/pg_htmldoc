@@ -99,7 +99,6 @@ static Datum htmldoc(PG_FUNCTION_ARGS, data_type_t data_type, input_type_t input
     Datum *elemsp;
     bool *nullsp;
     int nelemsp;
-    text *pdf;
     char *output_data = NULL;
     size_t output_len = 0;
     FILE *out;
@@ -160,9 +159,9 @@ static Datum htmldoc(PG_FUNCTION_ARGS, data_type_t data_type, input_type_t input
     image_flush_cache();
     switch (PG_NARGS()) {
         case 1: {
-            pdf = cstring_to_text_with_len(output_data, output_len);
+            text *pdf = cstring_to_text_with_len(output_data, output_len);
             free(output_data);
-            PG_RETURN_TEXT_P(pdf);
+            PG_RETURN_BYTEA_P(pdf);
         } break;
         default: PG_RETURN_BOOL(true); break;
     }
