@@ -1,0 +1,35 @@
+{
+    "name": "pg_htmldoc",
+    "abstract": "PostgreSQL htmldoc",
+    "description": "PostgreSQL implementation of HTMLDOC conversion software. It is a program that reads HTML and Markdown source files or web pages and generates corresponding EPUB, HTML, PostScript, or PDF files with an optional table of contents.",
+    "version": "1.0.0",
+    "maintainer": "RekGRpth <rekgrpth@gmail.com>",
+    "license": "mit",
+    "provides": {
+        "pg_htmldoc": {
+            "file": "pg_htmldoc--1.0.sql",
+            "version": "1.0.0"
+        }
+    },
+    "resources": {
+        "bugtracker": {
+            "web": "https://github.com/RekGRpth/pg_htmldoc/issues"
+        },
+        "repository": {
+            "url": "git://github.com/RekGRpth/pg_htmldoc.git",
+            "web": "https://github.com/RekGRpth/pg_htmldoc",
+            "type": "git"
+        }
+    },
+    "generated_by": "RekGRpth",
+    "meta-spec": {
+        "version": "1.0.0",
+        "url": "http://pgxn.org/meta/spec.txt"
+    },
+    "tags": [
+        "htmldoc",
+        "html",
+        "pdf",
+        "ps"
+    ]
+}
