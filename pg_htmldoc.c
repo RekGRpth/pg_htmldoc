@@ -21,12 +21,12 @@ static void read_fileurl(const char *fileurl) {
     const char *realname = file_find(Path, fileurl);
     const char *base = file_directory(fileurl);
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
-    if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL)))ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
+    if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
     htmlSetVariable(file, (uchar *)"_HD_URL", (uchar *)fileurl);
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)file_basename(fileurl));
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)base);
-    if (!realname)ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_find(\"%s\", \"%s\")", Path, fileurl)));
-    if (!(in = fopen(realname, "rb")))ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", realname)));
+    if (!realname) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_find(\"%s\", \"%s\")", Path, fileurl)));
+    if (!(in = fopen(realname, "rb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", realname)));
     htmlReadFile2(file, in, base);
     fclose(in);
     if (document == NULL) document = file; else {
@@ -40,10 +40,10 @@ static void read_html(char *html, size_t len) {
     tree_t *file;
     FILE *in;
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
-    if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL)))ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
+    if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)"html");
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)".");
-    if (!(in = fmemopen(html, len, "rb")))ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fmemopen")));
+    if (!(in = fmemopen(html, len, "rb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fmemopen")));
     htmlReadFile2(file, in, ".");
     fclose(in);
     if (document == NULL) document = file; else {
@@ -60,12 +60,12 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
     while (document && document->prev) document = document->prev;
     htmlFixLinks(document, document, 0);
     switch (PG_NARGS()) {
-        case 0: if (!(out = open_memstream(&output_data, &output_len)))ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!open_memstream"))); break;
+        case 0: if (!(out = open_memstream(&output_data, &output_len))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!open_memstream"))); break;
         default: {
             char *file;
             if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("handlebars requires argument file")));
             file = TextDatumGetCString(PG_GETARG_DATUM(0));
-            if (!(out = fopen(file, "wb")))ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", file)));
+            if (!(out = fopen(file, "wb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", file)));
             pfree(file);
         } break;
     }
