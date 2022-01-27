@@ -90,7 +90,7 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
 
 EXTENSION(htmldoc_addfile) {
     char *file;
-    if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addfile requires argument file")));
+    if (PG_ARGISNULL(0)) { cleanup(); ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addfile requires argument file"))); }
     file = TextDatumGetCString(PG_GETARG_DATUM(0));
     read_fileurl(file);
     pfree(file);
@@ -99,7 +99,7 @@ EXTENSION(htmldoc_addfile) {
 
 EXTENSION(htmldoc_addhtml) {
     text *html;
-    if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addhtml requires argument html")));
+    if (PG_ARGISNULL(0)) { cleanup(); ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addhtml requires argument html"))); }
     html = DatumGetTextP(PG_GETARG_DATUM(0));
     read_html(VARDATA_ANY(html), VARSIZE_ANY_EXHDR(html));
     PG_RETURN_BOOL(true);
@@ -107,7 +107,7 @@ EXTENSION(htmldoc_addhtml) {
 
 EXTENSION(htmldoc_addurl) {
     char *url;
-    if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addurl requires argument url")));
+    if (PG_ARGISNULL(0)) { cleanup(); ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addurl requires argument url"))); }
     url = TextDatumGetCString(PG_GETARG_DATUM(0));
     read_fileurl(url);
     pfree(url);
