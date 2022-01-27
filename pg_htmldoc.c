@@ -28,10 +28,10 @@ static void documentMemoryContextCallbackFunction(void *arg) {
 #endif
 
 static void read_fileurl(const char *fileurl) {
-    tree_t *file;
-    FILE *in;
-    const char *realname = file_find(Path, fileurl);
     const char *base = file_directory(fileurl);
+    const char *realname = file_find(Path, fileurl);
+    FILE *in;
+    tree_t *file;
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
     if (!document) document = file; else {
@@ -55,8 +55,8 @@ static void read_fileurl(const char *fileurl) {
 }
 
 static void read_html(char *html, size_t len) {
-    tree_t *file;
     FILE *in;
+    tree_t *file;
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
     if (!document) document = file; else {
