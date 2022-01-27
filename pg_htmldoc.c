@@ -32,6 +32,8 @@ static void read_fileurl(const char *fileurl) {
     const char *realname = file_find(Path, fileurl);
     FILE *in;
     tree_t *file;
+    if (!base) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_directory(\"%s\")", fileurl)));
+    if (!realname) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_find(\"%s\", \"%s\")", Path, fileurl)));
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
     if (!document) document = file; else {
@@ -48,7 +50,6 @@ static void read_fileurl(const char *fileurl) {
     htmlSetVariable(file, (uchar *)"_HD_URL", (uchar *)fileurl);
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)file_basename(fileurl));
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)base);
-    if (!realname) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_find(\"%s\", \"%s\")", Path, fileurl)));
     if (!(in = fopen(realname, "rb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", realname)));
     htmlReadFile2(file, in, base);
     fclose(in);
