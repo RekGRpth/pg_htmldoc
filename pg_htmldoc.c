@@ -27,13 +27,13 @@ static void documentMemoryContextCallbackFunction(void *arg) {
 }
 #endif
 
-static void read_fileurl(const char *fileurl) {
+static void read_fileurl(const char *fileurl, const char *path) {
     const char *base = file_directory(fileurl);
-    const char *realname = file_find(Path, fileurl);
+    const char *realname = file_find(path, fileurl);
     FILE *in;
     tree_t *file;
     if (!base) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_directory(\"%s\")", fileurl)));
-    if (!realname) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_find(\"%s\", \"%s\")", Path, fileurl)));
+    if (!realname) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_find(\"%s\", \"%s\")", path, fileurl)));
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
     if (!document) document = file; else {
@@ -110,7 +110,7 @@ EXTENSION(htmldoc_addfile) {
     char *file;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addfile requires argument file")));
     file = TextDatumGetCString(PG_GETARG_DATUM(0));
-    read_fileurl(file);
+    read_fileurl(file, Path);
     pfree(file);
     PG_RETURN_BOOL(true);
 }
@@ -127,7 +127,7 @@ EXTENSION(htmldoc_addurl) {
     char *url;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addurl requires argument url")));
     url = TextDatumGetCString(PG_GETARG_DATUM(0));
-    read_fileurl(url);
+    read_fileurl(url, NULL);
     pfree(url);
     PG_RETURN_BOOL(true);
 }
