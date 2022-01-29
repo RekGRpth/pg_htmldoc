@@ -27,7 +27,7 @@ static void documentMemoryContextCallbackFunction(void *arg) {
 }
 #endif
 
-static void read_fileurl(const char *fileurl, const char *path) {
+static void read_fileurl(tree_t **document, const char *fileurl, const char *path) {
     const char *base = file_directory(fileurl);
     const char *realname = file_find(path, fileurl);
     FILE *in;
@@ -36,10 +36,10 @@ static void read_fileurl(const char *fileurl, const char *path) {
     if (!realname) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_find(\"%s\", \"%s\")", path, fileurl)));
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
-    if (!document) document = file; else {
-        while (document->next) document = document->next;
-        document->next = file;
-        file->prev = document;
+    if (!*document) *document = file; else {
+        while ((*document)->next) *document = (*document)->next;
+        (*document)->next = file;
+        file->prev = *document;
     }
 #if PG_VERSION_NUM >= 90500
     if (!documentMemoryContextCallback.func) {
@@ -55,15 +55,15 @@ static void read_fileurl(const char *fileurl, const char *path) {
     fclose(in);
 }
 
-static void read_html(char *html, size_t len) {
+static void read_html(tree_t **document, const char *html, size_t len) {
     FILE *in;
     tree_t *file;
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
-    if (!document) document = file; else {
-        while (document->next) document = document->next;
-        document->next = file;
-        file->prev = document;
+    if (!*document) *document = file; else {
+        while ((*document)->next) *document = (*document)->next;
+        (*document)->next = file;
+        file->prev = *document;
     }
 #if PG_VERSION_NUM >= 90500
     if (!documentMemoryContextCallback.func) {
@@ -73,7 +73,7 @@ static void read_html(char *html, size_t len) {
 #endif
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)"html");
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)".");
-    if (!(in = fmemopen(html, len, "rb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fmemopen")));
+    if (!(in = fmemopen((void *)html, len, "rb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fmemopen")));
     htmlReadFile2(file, in, ".");
     fclose(in);
 }
@@ -110,7 +110,7 @@ EXTENSION(htmldoc_addfile) {
     char *file;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addfile requires argument file")));
     file = TextDatumGetCString(PG_GETARG_DATUM(0));
-    read_fileurl(file, Path);
+    read_fileurl(&document, file, Path);
     pfree(file);
     PG_RETURN_BOOL(true);
 }
@@ -119,7 +119,7 @@ EXTENSION(htmldoc_addhtml) {
     text *html;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addhtml requires argument html")));
     html = DatumGetTextP(PG_GETARG_DATUM(0));
-    read_html(VARDATA_ANY(html), VARSIZE_ANY_EXHDR(html));
+    read_html(&document, VARDATA_ANY(html), VARSIZE_ANY_EXHDR(html));
     PG_RETURN_BOOL(true);
 }
 
@@ -127,7 +127,7 @@ EXTENSION(htmldoc_addurl) {
     char *url;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addurl requires argument url")));
     url = TextDatumGetCString(PG_GETARG_DATUM(0));
-    read_fileurl(url, NULL);
+    read_fileurl(&document, url, NULL);
     pfree(url);
     PG_RETURN_BOOL(true);
 }
