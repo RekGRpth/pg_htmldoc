@@ -9,6 +9,7 @@
 
 PG_MODULE_MAGIC;
 
+static bool cleanup = false;
 #if PG_VERSION_NUM >= 90500
 static struct MemoryContextCallback documentMemoryContextCallback = {0};
 #endif
@@ -20,10 +21,12 @@ void _PG_init(void); void _PG_init(void) {
 
 #if PG_VERSION_NUM >= 90500
 static void documentMemoryContextCallbackFunction(void *arg) {
+    if (!cleanup) return;
     if (document) htmlDeleteTree(document);
     file_cleanup();
     image_flush_cache();
     document = NULL;
+    cleanup = false;
 }
 #endif
 
@@ -82,6 +85,7 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
     char *output_data = NULL;
     size_t output_len = 0;
     FILE *out;
+    cleanup = true;
     if (!document) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!document")));
     while (document && document->prev) document = document->prev;
     htmlFixLinks(document, document, 0);
@@ -108,27 +112,33 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
 
 EXTENSION(htmldoc_addfile) {
     char *file;
+    cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addfile requires argument file")));
     file = TextDatumGetCString(PG_GETARG_DATUM(0));
     read_fileurl(&document, file, Path);
     pfree(file);
+    cleanup = false;
     PG_RETURN_BOOL(true);
 }
 
 EXTENSION(htmldoc_addhtml) {
     text *html;
+    cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addhtml requires argument html")));
     html = DatumGetTextP(PG_GETARG_DATUM(0));
     read_html(&document, VARDATA_ANY(html), VARSIZE_ANY_EXHDR(html));
+    cleanup = false;
     PG_RETURN_BOOL(true);
 }
 
 EXTENSION(htmldoc_addurl) {
     char *url;
+    cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addurl requires argument url")));
     url = TextDatumGetCString(PG_GETARG_DATUM(0));
     read_fileurl(&document, url, NULL);
     pfree(url);
+    cleanup = false;
     PG_RETURN_BOOL(true);
 }
 
