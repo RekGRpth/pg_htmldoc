@@ -98,7 +98,7 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
     pspdf_export_out(document, NULL, out);
     switch (PG_NARGS()) {
         case 0: {
-            text *pdf = cstring_to_text_with_len(output_data, output_len);
+            bytea *pdf = cstring_to_text_with_len(output_data, output_len);
             free(output_data);
             PG_RETURN_BYTEA_P(pdf);
         } break;
