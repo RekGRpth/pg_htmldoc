@@ -125,8 +125,9 @@ EXTENSION(htmldoc_addhtml) {
     text *html;
     cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addhtml requires argument html")));
-    html = DatumGetTextP(PG_GETARG_DATUM(0));
+    html = PG_GETARG_TEXT_PP(0);
     read_html(&document, VARDATA_ANY(html), VARSIZE_ANY_EXHDR(html));
+    PG_FREE_IF_COPY(html, 0);
     cleanup = false;
     PG_RETURN_BOOL(true);
 }
