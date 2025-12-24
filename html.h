@@ -152,12 +152,12 @@ extern float		_htmlPPI;
 extern float		_htmlBrowserWidth;
 extern int		_htmlInitialized;
 
-tree_t	*htmlReadFile(tree_t *parent, FILE *fp, const char *base);
-tree_t	*htmlAddTree(tree_t *parent, markup_t markup, uchar *data);
-int	htmlDeleteTree(tree_t *parent);
-void	htmlFixLinks(tree_t *doc, tree_t *tree, uchar *base);
-int	htmlSetVariable(tree_t *t, uchar *name, uchar *value);
-void	htmlSetCharSet(const char *cs);
+extern tree_t	*htmlReadFile(tree_t *parent, FILE *fp, const char *base);
+extern tree_t	*htmlAddTree(tree_t *parent, markup_t markup, uchar *data);
+extern int	htmlDeleteTree(tree_t *parent);
+extern void	htmlFixLinks(tree_t *doc, tree_t *tree, uchar *base);
+extern int	htmlSetVariable(tree_t *t, uchar *name, uchar *value);
+extern void	htmlSetCharSet(const char *cs);
 
 #  ifdef __cplusplus
 }

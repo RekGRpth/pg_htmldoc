@@ -5,7 +5,7 @@
 extern "C" {
 #  endif /* __cplusplus */
 
-void	image_flush_cache(void);
+extern void	image_flush_cache(void);
 
 #  ifdef __cplusplus
 }
