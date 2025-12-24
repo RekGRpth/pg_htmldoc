@@ -57,7 +57,7 @@ static void read_fileurl(tree_t **document, const char *fileurl, const char *pat
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)file_basename(fileurl));
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)base);
     if (!(in = fopen(realname, "rb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", realname)));
-    htmlReadFile2(file, in, base);
+    htmlReadFile(file, in, base);
     fclose(in);
 }
 
@@ -80,7 +80,7 @@ static void read_html(tree_t **document, const char *html, size_t len) {
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)"html");
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)".");
     if (!(in = fmemopen((void *)html, len, "rb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fmemopen")));
-    htmlReadFile2(file, in, ".");
+    htmlReadFile(file, in, ".");
     fclose(in);
 }
 
