@@ -152,7 +152,7 @@ extern float		_htmlPPI;
 extern float		_htmlBrowserWidth;
 extern int		_htmlInitialized;
 
-tree_t	*htmlReadFile2(tree_t *parent, FILE *fp, const char *base);
+tree_t	*htmlReadFile(tree_t *parent, FILE *fp, const char *base);
 tree_t	*htmlAddTree(tree_t *parent, markup_t markup, uchar *data);
 int	htmlDeleteTree(tree_t *parent);
 void	htmlFixLinks(tree_t *doc, tree_t *tree, uchar *base);
