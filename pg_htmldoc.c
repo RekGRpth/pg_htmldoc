@@ -40,9 +40,6 @@ static void require_role(Oid role, const char *rolename, const char *action) {
 }
 
 static bool cleanup = false;
-#if PG_VERSION_NUM >= 90500
-static struct MemoryContextCallback documentMemoryContextCallback = {0};
-#endif
 static tree_t *document = NULL;
 
 void _PG_init(void); void _PG_init(void) {
@@ -75,9 +72,10 @@ static void read_fileurl(tree_t **document, const char *fileurl, const char *pat
         file->prev = *document;
     }
 #if PG_VERSION_NUM >= 90500
-    if (!documentMemoryContextCallback.func) {
-        documentMemoryContextCallback.func = documentMemoryContextCallbackFunction;
-        MemoryContextRegisterResetCallback(CurrentMemoryContext, &documentMemoryContextCallback);
+    {
+        MemoryContextCallback *cb = palloc0(sizeof(MemoryContextCallback));
+        cb->func = documentMemoryContextCallbackFunction;
+        MemoryContextRegisterResetCallback(CurrentMemoryContext, cb);
     }
 #endif
     htmlSetVariable(file, (uchar *)"_HD_URL", (uchar *)fileurl);
@@ -99,9 +97,10 @@ static void read_html(tree_t **document, const char *html, size_t len) {
         file->prev = *document;
     }
 #if PG_VERSION_NUM >= 90500
-    if (!documentMemoryContextCallback.func) {
-        documentMemoryContextCallback.func = documentMemoryContextCallbackFunction;
-        MemoryContextRegisterResetCallback(CurrentMemoryContext, &documentMemoryContextCallback);
+    {
+        MemoryContextCallback *cb = palloc0(sizeof(MemoryContextCallback));
+        cb->func = documentMemoryContextCallbackFunction;
+        MemoryContextRegisterResetCallback(CurrentMemoryContext, cb);
     }
 #endif
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)"html");
@@ -131,6 +130,11 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
         } break;
     }
     pspdf_export_out(document, NULL, out);
+    htmlDeleteTree(document);
+    file_cleanup();
+    image_flush_cache();
+    document = NULL;
+    cleanup = false;
     switch (PG_NARGS()) {
         case 0: {
             bytea *pdf = cstring_to_text_with_len(output_data, output_len);
