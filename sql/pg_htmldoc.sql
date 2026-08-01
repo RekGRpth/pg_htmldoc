@@ -103,6 +103,17 @@ SELECT octet_length(convert2pdf()) > 100 AS addfile_pdf_nonempty;
 RESET ROLE;
 
 --
+-- htmldoc_addfile() with a path that resolves locally (no "http:"/
+-- "https:"/"//" prefix) but doesn't exist on disk: file_find() (in
+-- the vendored htmldoc library) returns NULL, and read_fileurl()
+-- surfaces that as its own internal error rather than silently doing
+-- nothing.
+--
+SET ROLE htmldoc_test_full;
+SELECT htmldoc_addfile('/nonexistent/pg_htmldoc_test_missing_file');
+RESET ROLE;
+
+--
 -- htmldoc_addurl() resolves a plain local path exactly the way
 -- htmldoc_addfile() does (no "http:"/"https:"/"//" prefix), so it needs
 -- both roles too; confirm success end-to-end via the in-memory (bytea)
