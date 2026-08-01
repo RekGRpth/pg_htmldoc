@@ -162,6 +162,8 @@ EXTENSION(htmldoc_addhtml) {
     text *html;
     cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addhtml requires argument html")));
+    require_role(PGHTMLDOC_ROLE_READ_SERVER_FILES, "pg_read_server_files", "use htmldoc_addhtml (HTML may reference a local file via img/body/embed)");
+    require_role(PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM, "pg_execute_server_program", "use htmldoc_addhtml (HTML may reference a URL via img/body/embed)");
     html = PG_GETARG_TEXT_PP(0);
     read_html(&document, VARDATA_ANY(html), VARSIZE_ANY_EXHDR(html));
     PG_FREE_IF_COPY(html, 0);
