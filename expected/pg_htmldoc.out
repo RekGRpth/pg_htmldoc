@@ -26,6 +26,25 @@ BEGIN
 END
 $$;
 --
+-- No document queued: convert2pdf()/convert2pdf(file)/convert2ps()/
+-- convert2ps(file) all check for a queued document before anything
+-- else -- before even require_role() or the NULL-argument check --
+-- so calling any of them with nothing queued yet must fail with the
+-- same "!document" internal error regardless of call form or role.
+-- Use the privileged role so the error can't be mistaken for a
+-- permission denial.
+--
+SET ROLE htmldoc_test_full;
+SELECT convert2pdf();
+ERROR:  !document
+SELECT convert2pdf('/tmp/pg_htmldoc_test_no_document.pdf');
+ERROR:  !document
+SELECT convert2ps();
+ERROR:  !document
+SELECT convert2ps('/tmp/pg_htmldoc_test_no_document.ps');
+ERROR:  !document
+RESET ROLE;
+--
 -- Without either predefined role, every entry point must be denied: the
 -- render pipeline can resolve <img>/<body background>/<embed> references
 -- (and htmldoc_addfile/htmldoc_addurl arguments) to either a local file
