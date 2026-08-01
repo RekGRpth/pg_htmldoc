@@ -149,7 +149,8 @@ EXTENSION(htmldoc_addfile) {
     char *file;
     cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addfile requires argument file")));
-    require_role(PGHTMLDOC_ROLE_READ_SERVER_FILES, "pg_read_server_files", "read a server file with htmldoc_addfile");
+    require_role(PGHTMLDOC_ROLE_READ_SERVER_FILES, "pg_read_server_files", "use htmldoc_addfile (may resolve to a local file)");
+    require_role(PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM, "pg_execute_server_program", "use htmldoc_addfile (may resolve to a URL fetch)");
     file = TextDatumGetCString(PG_GETARG_DATUM(0));
     read_fileurl(&document, file, Path);
     pfree(file);
