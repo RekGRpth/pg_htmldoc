@@ -1,13 +1,31 @@
 CREATE EXTENSION pg_htmldoc;
 
 -- Two roles: one with neither predefined role pg_htmldoc's C code
--- checks for, one with both (mirrors what COPY checks for file access).
--- Role names can't start with "pg_" (reserved), so use htmldoc_test_*.
+-- checks for, one privileged enough to satisfy require_role() on
+-- whatever server this test runs against. Role names can't start with
+-- "pg_" (reserved), so use htmldoc_test_*.
+--
+-- require_role() only consults the pg_read_server_files/
+-- pg_execute_server_program/pg_write_server_files predefined roles from
+-- PG 11 onward -- they don't exist before that, and the C code falls
+-- back to a plain superuser() check instead (see the PG_VERSION_NUM
+-- guard around PGHTMLDOC_ROLE_* in pg_htmldoc.c). So grant the roles
+-- when they exist, and make htmldoc_test_full a superuser when they
+-- don't -- either way it ends up satisfying whichever check
+-- require_role() actually performs here.
 CREATE ROLE htmldoc_test_none;
 CREATE ROLE htmldoc_test_full;
-GRANT pg_read_server_files TO htmldoc_test_full;
-GRANT pg_execute_server_program TO htmldoc_test_full;
-GRANT pg_write_server_files TO htmldoc_test_full;
+DO $$
+BEGIN
+    IF current_setting('server_version_num')::int >= 110000 THEN
+        EXECUTE 'GRANT pg_read_server_files TO htmldoc_test_full';
+        EXECUTE 'GRANT pg_execute_server_program TO htmldoc_test_full';
+        EXECUTE 'GRANT pg_write_server_files TO htmldoc_test_full';
+    ELSE
+        EXECUTE 'ALTER ROLE htmldoc_test_full SUPERUSER';
+    END IF;
+END
+$$;
 
 --
 -- Without either predefined role, every entry point must be denied: the
