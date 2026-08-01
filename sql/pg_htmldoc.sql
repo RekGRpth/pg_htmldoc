@@ -57,6 +57,24 @@ SELECT convert2pdf('/tmp/pg_htmldoc_test_out.pdf');
 RESET ROLE;
 
 --
+-- convert2ps(file text) -- the file-output variant of convert2ps(),
+-- as opposed to the bytea-returning convert2ps() exercised below --
+-- was never exercised at all, unlike its convert2pdf(file) sibling
+-- above. Mirror the same denied/success pair for it.
+--
+SET ROLE htmldoc_test_full;
+SELECT htmldoc_addhtml('<html><body>ps file test</body></html>');
+RESET ROLE;
+
+SET ROLE htmldoc_test_none;
+SELECT convert2ps('/tmp/pg_htmldoc_test_denied.ps');
+RESET ROLE;
+
+SET ROLE htmldoc_test_full;
+SELECT convert2ps('/tmp/pg_htmldoc_test_out.ps');
+RESET ROLE;
+
+--
 -- htmldoc_addfile() was, until now, only ever exercised for its denial
 -- (via the htmldoc_test_none block above) -- its success path for the
 -- privileged role was never actually run. Confirm it end-to-end via
