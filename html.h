@@ -152,7 +152,9 @@ extern float		_htmlPPI;
 extern float		_htmlBrowserWidth;
 extern int		_htmlInitialized;
 
-extern tree_t	*htmlReadFile(tree_t *parent, FILE *fp, const char *base);
+/* htmlReadFile() is deliberately NOT declared here -- see pg_htmldoc.c for why
+ * (name collision with libxml2's htmlReadFile()); it must be resolved via
+ * dlsym() on a libhtmldoc-scoped handle, not called directly. */
 extern tree_t	*htmlAddTree(tree_t *parent, markup_t markup, uchar *data);
 extern int	htmlDeleteTree(tree_t *parent);
 extern void	htmlFixLinks(tree_t *doc, tree_t *tree, uchar *base);

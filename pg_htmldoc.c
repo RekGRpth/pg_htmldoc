@@ -2,6 +2,7 @@
 
 #include <catalog/pg_authid.h>
 #include <catalog/pg_type.h>
+#include <dlfcn.h>
 #include <miscadmin.h>
 #include <utils/acl.h>
 #include <utils/builtins.h>
@@ -42,7 +43,29 @@ static void require_role(Oid role, const char *rolename, const char *action) {
 static bool cleanup = false;
 static tree_t *document = NULL;
 
+/* libhtmldoc's htmlReadFile(tree_t *, FILE *, const char *) collides by name
+ * with libxml2's unrelated, ABI-incompatible htmlReadFile(const char *, const
+ * char *, int). libxml2 is already loaded into every backend for the built-in
+ * xml type, before CREATE EXTENSION dlopens libhtmldoc, so plain (non-weak,
+ * global-scope) symbol resolution binds calls to libxml2's version instead of
+ * libhtmldoc's. It fails silently -- returns NULL, which every caller here
+ * already ignores -- rather than crashing, so htmldoc_addfile/addhtml/addurl
+ * report success while silently queuing an empty document: convert2pdf/ps
+ * then produce a page-less, near-empty PDF/PS with no error at all.
+ *
+ * dlsym() on a handle scoped to libhtmldoc itself bypasses the ambiguous
+ * global scope and always resolves libhtmldoc's own definition, regardless of
+ * what else happens to be loaded into the backend or in what order. Resolved
+ * once in _PG_init(); html.h deliberately does not declare htmlReadFile(), so
+ * accidentally calling it directly (and reintroducing this bug) is a build
+ * error rather than a silent miscompile. */
+typedef tree_t *(*htmlReadFile_fn)(tree_t *parent, FILE *fp, const char *base);
+static htmlReadFile_fn real_htmlReadFile = NULL;
+
 void _PG_init(void); void _PG_init(void) {
+    void *handle;
+    if (!(handle = dlopen("libhtmldoc.so", RTLD_NOW | RTLD_NOLOAD))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!dlopen(\"libhtmldoc.so\"): %s", dlerror())));
+    if (!(real_htmlReadFile = (htmlReadFile_fn)dlsym(handle, "htmlReadFile"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!dlsym(\"htmlReadFile\"): %s", dlerror())));
     if (!_htmlInitialized) htmlSetCharSet("utf-8");
 }
 
@@ -82,7 +105,7 @@ static void read_fileurl(tree_t **document, const char *fileurl, const char *pat
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)file_basename(fileurl));
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)base);
     if (!(in = fopen(realname, "rb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", realname)));
-    htmlReadFile(file, in, base);
+    real_htmlReadFile(file, in, base);
     fclose(in);
 }
 
@@ -106,7 +129,7 @@ static void read_html(tree_t **document, const char *html, size_t len) {
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)"html");
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)".");
     if (!(in = fmemopen((void *)html, len, "rb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fmemopen")));
-    htmlReadFile(file, in, ".");
+    real_htmlReadFile(file, in, ".");
     fclose(in);
 }
 

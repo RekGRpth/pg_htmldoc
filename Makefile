@@ -7,5 +7,5 @@ PG_CONFIG = pg_config
 REGRESS = $(patsubst sql/%.sql,%,$(TESTS))
 TESTS = $(wildcard sql/*.sql)
 PGXS = $(shell $(PG_CONFIG) --pgxs)
-SHLIB_LINK = -lhtmldoc
+SHLIB_LINK = -lhtmldoc -ldl
 include $(PGXS)
