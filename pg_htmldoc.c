@@ -129,7 +129,7 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
             pfree(file);
         } break;
     }
-    pspdf_export_out(document, NULL, out);
+    if (pspdf_export_out(document, NULL, out)) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("pspdf_export_out failed")));
     htmlDeleteTree(document);
     file_cleanup();
     image_flush_cache();
