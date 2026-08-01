@@ -1,6 +1,9 @@
 #include <postgres.h>
 
+#include <catalog/pg_authid.h>
 #include <catalog/pg_type.h>
+#include <miscadmin.h>
+#include <utils/acl.h>
 #include <utils/builtins.h>
 #if PG_VERSION_NUM >= 160000
 #include <varatt.h>
@@ -11,6 +14,30 @@
 #define EXTENSION(function) Datum (function)(PG_FUNCTION_ARGS); PG_FUNCTION_INFO_V1(function); Datum (function)(PG_FUNCTION_ARGS)
 
 PG_MODULE_MAGIC;
+
+/* Mirrors the pg_read_server_files/pg_write_server_files/pg_execute_server_program
+ * checks that COPY performs in DoCopy() (src/backend/commands/copy.c): access to the
+ * server filesystem or network is gated on role membership rather than EXECUTE grants,
+ * so it can't be bypassed by granting EXECUTE on these functions to PUBLIC. */
+#if PG_VERSION_NUM >= 110000
+#define PGHTMLDOC_ROLE_READ_SERVER_FILES      ROLE_PG_READ_SERVER_FILES
+#define PGHTMLDOC_ROLE_WRITE_SERVER_FILES     ROLE_PG_WRITE_SERVER_FILES
+#define PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM ROLE_PG_EXECUTE_SERVER_PROGRAM
+#else
+#define PGHTMLDOC_ROLE_READ_SERVER_FILES      InvalidOid
+#define PGHTMLDOC_ROLE_WRITE_SERVER_FILES     InvalidOid
+#define PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM InvalidOid
+#endif
+
+static void require_role(Oid role, const char *rolename, const char *action) {
+#if PG_VERSION_NUM >= 110000
+    if (!has_privs_of_role(GetUserId(), role))
+#else
+    (void)role;
+    if (!superuser())
+#endif
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied to %s", action), errdetail("Only roles with privileges of the \"%s\" role may %s.", rolename, action)));
+}
 
 static bool cleanup = false;
 #if PG_VERSION_NUM >= 90500
@@ -97,6 +124,7 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
         default: {
             char *file;
             if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc requires argument file")));
+            require_role(PGHTMLDOC_ROLE_WRITE_SERVER_FILES, "pg_write_server_files", "write htmldoc output to a server file");
             file = TextDatumGetCString(PG_GETARG_DATUM(0));
             if (!(out = fopen(file, "wb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", file)));
             pfree(file);
@@ -117,6 +145,7 @@ EXTENSION(htmldoc_addfile) {
     char *file;
     cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addfile requires argument file")));
+    require_role(PGHTMLDOC_ROLE_READ_SERVER_FILES, "pg_read_server_files", "read a server file with htmldoc_addfile");
     file = TextDatumGetCString(PG_GETARG_DATUM(0));
     read_fileurl(&document, file, Path);
     pfree(file);
@@ -139,6 +168,7 @@ EXTENSION(htmldoc_addurl) {
     char *url;
     cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addurl requires argument url")));
+    require_role(PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM, "pg_execute_server_program", "fetch a URL with htmldoc_addurl");
     url = TextDatumGetCString(PG_GETARG_DATUM(0));
     read_fileurl(&document, url, NULL);
     pfree(url);
