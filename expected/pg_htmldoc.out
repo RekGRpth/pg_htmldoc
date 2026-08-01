@@ -69,6 +69,27 @@ SELECT convert2pdf('/tmp/pg_htmldoc_test_out.pdf');
 
 RESET ROLE;
 --
+-- htmldoc_addfile() was, until now, only ever exercised for its denial
+-- (via the htmldoc_test_none block above) -- its success path for the
+-- privileged role was never actually run. Confirm it end-to-end via
+-- the in-memory (bytea) output path, same as the addurl/addhtml
+-- checks below.
+--
+SET ROLE htmldoc_test_full;
+SELECT htmldoc_addfile('/etc/hostname');
+ htmldoc_addfile 
+-----------------
+ t
+(1 row)
+
+SELECT octet_length(convert2pdf()) > 100 AS addfile_pdf_nonempty;
+ addfile_pdf_nonempty 
+----------------------
+ t
+(1 row)
+
+RESET ROLE;
+--
 -- htmldoc_addurl() resolves a plain local path exactly the way
 -- htmldoc_addfile() does (no "http:"/"https:"/"//" prefix), so it needs
 -- both roles too; confirm success end-to-end via the in-memory (bytea)
