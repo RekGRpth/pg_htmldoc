@@ -1,0 +1,87 @@
+CREATE EXTENSION pg_htmldoc;
+-- Two roles: one with neither predefined role pg_htmldoc's C code
+-- checks for, one with both (mirrors what COPY checks for file access).
+-- Role names can't start with "pg_" (reserved), so use htmldoc_test_*.
+CREATE ROLE htmldoc_test_none;
+CREATE ROLE htmldoc_test_full;
+GRANT pg_read_server_files TO htmldoc_test_full;
+GRANT pg_execute_server_program TO htmldoc_test_full;
+GRANT pg_write_server_files TO htmldoc_test_full;
+--
+-- Without either predefined role, every entry point must be denied: the
+-- render pipeline can resolve <img>/<body background>/<embed> references
+-- (and htmldoc_addfile/htmldoc_addurl arguments) to either a local file
+-- or a URL fetch, regardless of which function was called.
+--
+SET ROLE htmldoc_test_none;
+SELECT htmldoc_addhtml('<html><body>no privilege</body></html>');
+ERROR:  permission denied to use htmldoc_addhtml (HTML may reference a local file via img/body/embed)
+DETAIL:  Only roles with privileges of the "pg_read_server_files" role may use htmldoc_addhtml (HTML may reference a local file via img/body/embed).
+SELECT htmldoc_addfile('/etc/hostname');
+ERROR:  permission denied to use htmldoc_addfile (may resolve to a local file)
+DETAIL:  Only roles with privileges of the "pg_read_server_files" role may use htmldoc_addfile (may resolve to a local file).
+SELECT htmldoc_addurl('/etc/hostname');
+ERROR:  permission denied to use htmldoc_addurl (may resolve to a local file)
+DETAIL:  Only roles with privileges of the "pg_read_server_files" role may use htmldoc_addurl (may resolve to a local file).
+RESET ROLE;
+--
+-- Build a real document as the fully-privileged role, then confirm the
+-- unprivileged role still can't write it to a server file, and that the
+-- privileged role can.
+--
+SET ROLE htmldoc_test_full;
+SELECT htmldoc_addhtml('<html><body><h1>pg_htmldoc regression test</h1></body></html>');
+ htmldoc_addhtml 
+-----------------
+ t
+(1 row)
+
+RESET ROLE;
+SET ROLE htmldoc_test_none;
+SELECT convert2pdf('/tmp/pg_htmldoc_test_denied.pdf');
+ERROR:  permission denied to write htmldoc output to a server file
+DETAIL:  Only roles with privileges of the "pg_write_server_files" role may write htmldoc output to a server file.
+RESET ROLE;
+SET ROLE htmldoc_test_full;
+SELECT convert2pdf('/tmp/pg_htmldoc_test_out.pdf');
+ convert2pdf 
+-------------
+ t
+(1 row)
+
+RESET ROLE;
+--
+-- htmldoc_addurl() resolves a plain local path exactly the way
+-- htmldoc_addfile() does (no "http:"/"https:"/"//" prefix), so it needs
+-- both roles too; confirm success end-to-end via the in-memory (bytea)
+-- output path, for both PDF and PS.
+--
+SET ROLE htmldoc_test_full;
+SELECT htmldoc_addurl('/etc/hostname');
+ htmldoc_addurl 
+----------------
+ t
+(1 row)
+
+SELECT octet_length(convert2pdf()) > 100 AS pdf_nonempty;
+ pdf_nonempty 
+--------------
+ t
+(1 row)
+
+SELECT htmldoc_addhtml('<html><body>ps test</body></html>');
+ htmldoc_addhtml 
+-----------------
+ t
+(1 row)
+
+SELECT octet_length(convert2ps()) > 100 AS ps_nonempty;
+ ps_nonempty 
+-------------
+ t
+(1 row)
+
+RESET ROLE;
+DROP ROLE htmldoc_test_none;
+DROP ROLE htmldoc_test_full;
+DROP EXTENSION pg_htmldoc;
