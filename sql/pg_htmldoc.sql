@@ -99,6 +99,26 @@ SELECT htmldoc_addhtml('<html><body>ps test</body></html>');
 SELECT octet_length(convert2ps()) > 100 AS ps_nonempty;
 RESET ROLE;
 
+--
+-- Required arguments: htmldoc_addhtml/addfile/addurl and the
+-- file-output convert2pdf(file)/convert2ps(file) all reject a NULL
+-- argument outright. The PG_ARGISNULL(0) check runs before
+-- require_role() in every one of them, so a privileged role sees the
+-- same ERRCODE_NULL_VALUE_NOT_ALLOWED error an unprivileged one
+-- would -- this isolates the NULL check from the permission check.
+-- convert2pdf/convert2ps need a document already queued to reach
+-- their own NULL check instead of the (separate, untested) "no
+-- document queued" error, hence the addhtml() in between.
+--
+SET ROLE htmldoc_test_full;
+SELECT htmldoc_addhtml(NULL);
+SELECT htmldoc_addfile(NULL);
+SELECT htmldoc_addurl(NULL);
+SELECT htmldoc_addhtml('<html><body>null file arg test</body></html>');
+SELECT convert2pdf(NULL);
+SELECT convert2ps(NULL);
+RESET ROLE;
+
 DROP ROLE htmldoc_test_none;
 DROP ROLE htmldoc_test_full;
 DROP EXTENSION pg_htmldoc;
