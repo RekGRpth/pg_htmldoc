@@ -20,10 +20,16 @@ PG_MODULE_MAGIC;
  * checks that COPY performs in DoCopy() (src/backend/commands/copy.c): access to the
  * server filesystem or network is gated on role membership rather than EXECUTE grants,
  * so it can't be bypassed by granting EXECUTE on these functions to PUBLIC. */
-#if PG_VERSION_NUM >= 110000
+#if PG_VERSION_NUM >= 140000
+/* Renamed from DEFAULT_ROLE_* to ROLE_PG_* in PG 14 (commit c9c41c7a337,
+ * "Rename Default Roles to Predefined Roles"). */
 #define PGHTMLDOC_ROLE_READ_SERVER_FILES      ROLE_PG_READ_SERVER_FILES
 #define PGHTMLDOC_ROLE_WRITE_SERVER_FILES     ROLE_PG_WRITE_SERVER_FILES
 #define PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM ROLE_PG_EXECUTE_SERVER_PROGRAM
+#elif PG_VERSION_NUM >= 110000
+#define PGHTMLDOC_ROLE_READ_SERVER_FILES      DEFAULT_ROLE_READ_SERVER_FILES
+#define PGHTMLDOC_ROLE_WRITE_SERVER_FILES     DEFAULT_ROLE_WRITE_SERVER_FILES
+#define PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM DEFAULT_ROLE_EXECUTE_SERVER_PROGRAM
 #else
 #define PGHTMLDOC_ROLE_READ_SERVER_FILES      InvalidOid
 #define PGHTMLDOC_ROLE_WRITE_SERVER_FILES     InvalidOid
