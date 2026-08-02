@@ -127,6 +127,61 @@ SELECT octet_length(convert2ps()) > 100 AS ps_nonempty;
 RESET ROLE;
 
 --
+-- Multiple add* calls before a single convert* chain their documents
+-- together (via document->next/->prev, set up identically in
+-- read_fileurl()/read_html()) rather than each new add* replacing the
+-- previous one. htmldoc flows chained documents continuously (no
+-- forced page break between them), so output size isn't a reliable
+-- signal -- a second copy of the same filler content mostly just
+-- fills out remaining whitespace on the last page. Count PDF page
+-- objects instead (a direct, unambiguous signal of how much content
+-- actually got rendered) and confirm a second add* produces more
+-- pages than a single one. Counting is done on the raw bytea (via a
+-- manual position()/substring() scan) rather than by casting to text,
+-- since compressed PDF content can contain embedded NUL bytes that
+-- text values can't hold.
+--
+SET ROLE htmldoc_test_full;
+DO $$
+DECLARE
+    needle bytea := convert_to('/Type/Page', 'LATIN1');
+    single_pdf bytea;
+    combined_pdf bytea;
+    single_pages integer;
+    combined_pages integer;
+    pos integer;
+BEGIN
+    PERFORM htmldoc_addhtml('<html><body><h1>multi-document test</h1><p>' || repeat('filler text. ', 400) || '</p></body></html>');
+    single_pdf := convert2pdf();
+
+    PERFORM htmldoc_addhtml('<html><body><h1>multi-document test, part one</h1><p>' || repeat('filler text. ', 400) || '</p></body></html>');
+    PERFORM htmldoc_addhtml('<html><body><h1>multi-document test, part two</h1><p>' || repeat('filler text. ', 400) || '</p></body></html>');
+    combined_pdf := convert2pdf();
+
+    single_pages := 0;
+    LOOP
+        pos := position(needle in single_pdf);
+        EXIT WHEN pos = 0;
+        single_pages := single_pages + 1;
+        single_pdf := substring(single_pdf from pos + length(needle));
+    END LOOP;
+
+    combined_pages := 0;
+    LOOP
+        pos := position(needle in combined_pdf);
+        EXIT WHEN pos = 0;
+        combined_pages := combined_pages + 1;
+        combined_pdf := substring(combined_pdf from pos + length(needle));
+    END LOOP;
+
+    IF combined_pages <= single_pages THEN
+        RAISE EXCEPTION 'combined two-document render (% pages) has no more pages than a single document (% pages) -- second add* may not have been included', combined_pages, single_pages;
+    END IF;
+END
+$$;
+RESET ROLE;
+
+--
 -- Required arguments: htmldoc_addhtml/addfile/addurl and the
 -- file-output convert2pdf(file)/convert2ps(file) all reject a NULL
 -- argument outright. The PG_ARGISNULL(0) check runs before
