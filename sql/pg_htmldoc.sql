@@ -182,6 +182,42 @@ $$;
 RESET ROLE;
 
 --
+-- Cleanup on rollback: an add* call that fails *after* a document has
+-- already been chained onto `document` and its MemoryContextCallback
+-- registered -- unlike the NULL-argument and missing-file checks
+-- above, which both fail before either happens -- must still leave
+-- things clean once the aborted statement unwinds:
+-- documentMemoryContextCallbackFunction() tears the tree down and
+-- resets `document` to NULL (PG >= 9.5 only -- see the
+-- PG_VERSION_NUM guard in pg_htmldoc.c; older versions have no such
+-- callback, so the check below is skipped there). htmldoc_addfile()
+-- on a file that exists (so file_find() succeeds and the tree/
+-- callback get set up) but isn't readable by this role reaches
+-- exactly that path: fopen() in read_fileurl() is the only failure
+-- point left after the tree is chained in.
+--
+SET ROLE htmldoc_test_full;
+SELECT htmldoc_addfile('/etc/shadow');
+RESET ROLE;
+
+SET ROLE htmldoc_test_full;
+DO $$
+BEGIN
+    IF current_setting('server_version_num')::int >= 90500 THEN
+        BEGIN
+            PERFORM convert2pdf();
+            RAISE EXCEPTION 'convert2pdf() succeeded after a failed htmldoc_addfile() -- the half-built document from the failed call was not cleaned up';
+        EXCEPTION WHEN OTHERS THEN
+            IF SQLERRM IS DISTINCT FROM '!document' THEN
+                RAISE;
+            END IF;
+        END;
+    END IF;
+END
+$$;
+RESET ROLE;
+
+--
 -- Required arguments: htmldoc_addhtml/addfile/addurl and the
 -- file-output convert2pdf(file)/convert2ps(file) all reject a NULL
 -- argument outright. The PG_ARGISNULL(0) check runs before
