@@ -11,6 +11,7 @@
 #endif
 
 #include "htmldoc.h"
+#include "pg_whitelist.h"
 
 #define EXTENSION(function) Datum (function)(PG_FUNCTION_ARGS); PG_FUNCTION_INFO_V1(function); Datum (function)(PG_FUNCTION_ARGS)
 
@@ -73,6 +74,7 @@ void _PG_init(void); void _PG_init(void) {
     if (!(handle = dlopen("libhtmldoc.so", RTLD_NOW | RTLD_NOLOAD))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!dlopen(\"libhtmldoc.so\"): %s", dlerror())));
     if (!(real_htmlReadFile = (htmlReadFile_fn)dlsym(handle, "htmlReadFile"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!dlsym(\"htmlReadFile\"): %s", dlerror())));
     if (!_htmlInitialized) htmlSetCharSet("utf-8");
+    pg_whitelist_init("pg_htmldoc.whitelist");
 }
 
 #if PG_VERSION_NUM >= 90500
@@ -87,12 +89,16 @@ static void documentMemoryContextCallbackFunction(void *arg) {
 #endif
 
 static void read_fileurl(tree_t **document, const char *fileurl, const char *path) {
-    const char *base = file_directory(fileurl);
-    const char *realname = file_find(path, fileurl);
+    const char *base;
+    const char *realname;
     FILE *in;
     tree_t *file;
+    pg_whitelist_check_url(fileurl);
+    base = file_directory(fileurl);
+    realname = file_find(path, fileurl);
     if (!base) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_directory(\"%s\")", fileurl)));
     if (!realname) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_find(\"%s\", \"%s\")", path, fileurl)));
+    pg_whitelist_check_local(fileurl, realname);
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
     if (!*document) *document = file; else {

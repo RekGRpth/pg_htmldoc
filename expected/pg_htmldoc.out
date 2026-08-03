@@ -12,8 +12,14 @@ CREATE EXTENSION pg_htmldoc;
 -- when they exist, and make htmldoc_test_full a superuser when they
 -- don't -- either way it ends up satisfying whichever check
 -- require_role() actually performs here.
+--
+-- htmldoc_test_full needs LOGIN (unlike htmldoc_test_none, only ever
+-- used via SET ROLE): the pg_htmldoc.whitelist tests below need to
+-- \c into it directly, since ALTER ROLE ... SET only takes effect for
+-- a new connection as that role, not retroactively via SET ROLE in an
+-- already-open session.
 CREATE ROLE htmldoc_test_none;
-CREATE ROLE htmldoc_test_full;
+CREATE ROLE htmldoc_test_full LOGIN;
 DO $$
 BEGIN
     IF current_setting('server_version_num')::int >= 110000 THEN
@@ -267,6 +273,116 @@ BEGIN
 END
 $$;
 RESET ROLE;
+--
+-- pg_htmldoc.whitelist (see the pg_whitelist submodule) adds an optional,
+-- per-role restriction on top of the pg_read_server_files/
+-- pg_execute_server_program checks above: even htmldoc_test_full, which
+-- holds both, can be scoped down to specific file:// / http(s):// prefixes.
+-- ALTER ROLE ... SET only takes effect for a *new* connection as that role
+-- (role-level GUC defaults are applied once, in InitPostgres, at backend
+-- startup) -- unlike the plain role-membership checks above, SET ROLE
+-- within this already-open session will NOT pick it up, so exercising it
+-- means reconnecting via \c (hence htmldoc_test_full needing LOGIN).
+--
+SELECT current_user AS pg_htmldoc_test_orig_user \gset
+--
+-- An exact file:// entry permits only that file.
+--
+ALTER ROLE htmldoc_test_full SET pg_htmldoc.whitelist = 'file:///etc/hostname';
+\c - htmldoc_test_full
+--
+-- pg_htmldoc.so isn't actually loaded into this fresh backend yet -- that
+-- only happens on the first call into it, below -- so pg_htmldoc.whitelist
+-- is still just an unenforced placeholder GUC at this point, not yet
+-- reconciled with the PGC_SUSET definition pg_whitelist_init() registers.
+-- The PGC_SUSET check further down deliberately runs after this, once the
+-- module (and the real GUC definition) is guaranteed to be loaded.
+--
+SELECT htmldoc_addfile('/etc/hostname');
+ htmldoc_addfile 
+-----------------
+ t
+(1 row)
+
+SELECT octet_length(convert2pdf()) > 100 AS whitelist_exact_match_pdf_nonempty;
+ whitelist_exact_match_pdf_nonempty 
+------------------------------------
+ t
+(1 row)
+
+--
+-- pg_htmldoc.whitelist is registered PGC_SUSET, so only a superuser can set
+-- it -- confirm that htmldoc_test_full, connected directly (not merely SET
+-- ROLE'd) and thus genuinely non-superuser, still can't loosen its own
+-- scope with a plain SET. Wrapped in a DO block guarded by version,
+-- mirroring the cleanup-on-rollback check earlier in this file, because
+-- pre-PG11 htmldoc_test_full is made an actual superuser instead of merely
+-- holding the predefined roles (see the role setup at the top of this
+-- file), so the plain SET would legitimately succeed there -- a DO block's
+-- own output ("DO") stays identical across versions either way, since the
+-- mismatch (if any) is what gets raised, not the version check itself.
+--
+DO $$
+BEGIN
+    IF current_setting('server_version_num')::int >= 110000 THEN
+        BEGIN
+            PERFORM set_config('pg_htmldoc.whitelist', 'file:///etc/passwd', false);
+            RAISE EXCEPTION 'htmldoc_test_full was able to loosen its own pg_htmldoc.whitelist with a plain SET';
+        EXCEPTION WHEN insufficient_privilege THEN
+            NULL;
+        END;
+    END IF;
+END
+$$;
+SELECT htmldoc_addfile('/etc/passwd');
+ERROR:  permission denied to access "/etc/passwd"
+DETAIL:  whitelist does not permit this file or URL for the current role.
+--
+-- A file:// entry with a trailing slash permits anything under that
+-- directory, but the resolved path is realpath()-canonicalized before
+-- comparison, so ".." can't be used to climb back out of it even though the
+-- raw string would otherwise start with the whitelisted prefix.
+--
+\c - :pg_htmldoc_test_orig_user
+ALTER ROLE htmldoc_test_full SET pg_htmldoc.whitelist = 'file:///etc/ssl/';
+\c - htmldoc_test_full
+SELECT htmldoc_addfile('/etc/ssl/openssl.cnf');
+ htmldoc_addfile 
+-----------------
+ t
+(1 row)
+
+SELECT octet_length(convert2pdf()) > 100 AS whitelist_directory_match_pdf_nonempty;
+ whitelist_directory_match_pdf_nonempty 
+----------------------------------------
+ t
+(1 row)
+
+SELECT htmldoc_addfile('/etc/hostname');
+ERROR:  permission denied to access "/etc/hostname"
+DETAIL:  whitelist does not permit this file or URL for the current role.
+SELECT htmldoc_addfile('/etc/ssl/../passwd');
+ERROR:  permission denied to access "/etc/ssl/../passwd"
+DETAIL:  whitelist does not permit this file or URL for the current role.
+--
+-- http(s):// entries are enforced *before* the URL is fetched --
+-- pg_whitelist_check_url() runs ahead of htmldoc's file_find() in
+-- read_fileurl(), specifically so a disallowed host is never actually
+-- contacted. 192.0.2.0/24 is the RFC 5737 documentation range: reserved and
+-- guaranteed non-routable, so if the fetch were attempted anyway (i.e. if
+-- this ordering regressed) the error below would come back as an internal
+-- "!file_find" failure instead of the permission-denied error this checks
+-- for -- and it would take a while doing it too, since htmldoc's HTTP
+-- client retries with real connect timeouts.
+--
+\c - :pg_htmldoc_test_orig_user
+ALTER ROLE htmldoc_test_full SET pg_htmldoc.whitelist = 'https://example.com/';
+\c - htmldoc_test_full
+SELECT htmldoc_addurl('http://192.0.2.1/forbidden');
+ERROR:  permission denied to access "http://192.0.2.1/forbidden"
+DETAIL:  whitelist does not permit this file or URL for the current role.
+\c - :pg_htmldoc_test_orig_user
+ALTER ROLE htmldoc_test_full RESET pg_htmldoc.whitelist;
 --
 -- Required arguments: htmldoc_addhtml/addfile/addurl and the
 -- file-output convert2pdf(file)/convert2ps(file) all reject a NULL
