@@ -1,10 +1,8 @@
 #include <postgres.h>
 
-#include <catalog/pg_authid.h>
 #include <catalog/pg_type.h>
 #include <dlfcn.h>
 #include <miscadmin.h>
-#include <utils/acl.h>
 #include <utils/builtins.h>
 #if PG_VERSION_NUM >= 160000
 #include <varatt.h>
@@ -17,37 +15,14 @@
 
 PG_MODULE_MAGIC;
 
-/* Mirrors the pg_read_server_files/pg_write_server_files/pg_execute_server_program
- * checks that COPY performs in DoCopy() (src/backend/commands/copy.c): access to the
- * server filesystem or network is gated on role membership rather than EXECUTE grants,
- * so it can't be bypassed by granting EXECUTE on these functions to PUBLIC. */
-#if PG_VERSION_NUM >= 140000
-/* Renamed from DEFAULT_ROLE_* to ROLE_PG_* in PG 14 (commit c9c41c7a337,
- * "Rename Default Roles to Predefined Roles"). */
-#define PGHTMLDOC_ROLE_READ_SERVER_FILES      ROLE_PG_READ_SERVER_FILES
-#define PGHTMLDOC_ROLE_WRITE_SERVER_FILES     ROLE_PG_WRITE_SERVER_FILES
-#define PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM ROLE_PG_EXECUTE_SERVER_PROGRAM
-#elif PG_VERSION_NUM >= 110000
-#define PGHTMLDOC_ROLE_READ_SERVER_FILES      DEFAULT_ROLE_READ_SERVER_FILES
-#define PGHTMLDOC_ROLE_WRITE_SERVER_FILES     DEFAULT_ROLE_WRITE_SERVER_FILES
-#define PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM DEFAULT_ROLE_EXECUTE_SERVER_PROGRAM
-#else
-#define PGHTMLDOC_ROLE_READ_SERVER_FILES      InvalidOid
-#define PGHTMLDOC_ROLE_WRITE_SERVER_FILES     InvalidOid
-#define PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM InvalidOid
-#endif
-
-static bool has_role(Oid role) {
-#if PG_VERSION_NUM >= 110000
-    return has_privs_of_role(GetUserId(), role);
-#else
-    (void)role;
-    return superuser();
-#endif
-}
-
-static void require_role(bool has, const char *rolename, const char *action) {
-    if (!has) ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied to %s", action), errdetail("Only roles with privileges of the \"%s\" role may %s.", rolename, action)));
+/* pg_whitelist's "privileged" caller is a superuser; anyone else must be
+ * granted access explicitly via pg_htmldoc.whitelist. Writing htmldoc
+ * output to a server file, and htmldoc_addhtml() (whose HTML may reference
+ * local files/URLs deep inside libhtmldoc's rendering pipeline, with no
+ * specific file/URL here for pg_whitelist to check), have no whitelist
+ * alternative and so require superuser unconditionally. */
+static void require_superuser(const char *action) {
+    if (!superuser()) ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied to %s", action), errdetail("Only superuser may %s.", action)));
 }
 
 static bool cleanup = false;
@@ -161,7 +136,7 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
         default: {
             char *file;
             if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc requires argument file")));
-            require_role(has_role(PGHTMLDOC_ROLE_WRITE_SERVER_FILES), "pg_write_server_files", "write htmldoc output to a server file");
+            require_superuser("write htmldoc output to a server file");
             file = TextDatumGetCString(PG_GETARG_DATUM(0));
             if (!(out = fopen(file, "wb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", file)));
             pfree(file);
@@ -184,22 +159,22 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
 }
 
 /* Unlike htmldoc_addhtml() below, htmldoc_addfile()/htmldoc_addurl() name a
- * single concrete file/URL up front, so a role missing one or both of the
- * predefined roles isn't refused outright: read_fileurl() -> pg_whitelist_
- * check_url()/check_local() still admit it if pg_htmldoc.whitelist
- * explicitly grants that specific file/URL, treating the whitelist as an
- * alternative grant rather than only a narrowing of an already-privileged
- * role. htmldoc_addhtml() can't offer the same: whatever local files or
- * URLs its HTML ends up referencing (img/body/embed) are resolved deep
- * inside libhtmldoc's rendering pipeline, never through read_fileurl(), so
- * there's no specific file/URL here to check the whitelist against -- both
- * predefined roles remain mandatory for it. */
+ * single concrete file/URL up front, so a non-superuser caller isn't
+ * refused outright: read_fileurl() -> pg_whitelist_check_url()/check_local()
+ * still admit it if pg_htmldoc.whitelist explicitly grants that specific
+ * file/URL, treating the whitelist as an alternative grant rather than only
+ * a narrowing of an already-privileged caller. htmldoc_addhtml() can't offer
+ * the same: whatever local files or URLs its HTML ends up referencing
+ * (img/body/embed) are resolved deep inside libhtmldoc's rendering
+ * pipeline, never through read_fileurl(), so there's no specific file/URL
+ * here to check the whitelist against -- superuser remains mandatory for
+ * it. */
 EXTENSION(htmldoc_addfile) {
     char *file;
     bool privileged;
     cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addfile requires argument file")));
-    privileged = has_role(PGHTMLDOC_ROLE_READ_SERVER_FILES) && has_role(PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM);
+    privileged = superuser();
     file = TextDatumGetCString(PG_GETARG_DATUM(0));
     read_fileurl(&document, file, Path, privileged);
     pfree(file);
@@ -211,8 +186,7 @@ EXTENSION(htmldoc_addhtml) {
     text *html;
     cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addhtml requires argument html")));
-    require_role(has_role(PGHTMLDOC_ROLE_READ_SERVER_FILES), "pg_read_server_files", "use htmldoc_addhtml (HTML may reference a local file via img/body/embed)");
-    require_role(has_role(PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM), "pg_execute_server_program", "use htmldoc_addhtml (HTML may reference a URL via img/body/embed)");
+    require_superuser("use htmldoc_addhtml (HTML may reference a local file or URL via img/body/embed)");
     html = PG_GETARG_TEXT_PP(0);
     read_html(&document, VARDATA_ANY(html), VARSIZE_ANY_EXHDR(html));
     PG_FREE_IF_COPY(html, 0);
@@ -225,7 +199,7 @@ EXTENSION(htmldoc_addurl) {
     bool privileged;
     cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addurl requires argument url")));
-    privileged = has_role(PGHTMLDOC_ROLE_READ_SERVER_FILES) && has_role(PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM);
+    privileged = superuser();
     url = TextDatumGetCString(PG_GETARG_DATUM(0));
     read_fileurl(&document, url, NULL, privileged);
     pfree(url);

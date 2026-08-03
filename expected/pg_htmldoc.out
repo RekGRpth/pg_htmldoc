@@ -1,45 +1,24 @@
 CREATE EXTENSION pg_htmldoc;
--- Two roles: one with neither predefined role pg_htmldoc's C code
--- checks for, one privileged enough to satisfy require_role() on
--- whatever server this test runs against. Role names can't start with
--- "pg_" (reserved), so use htmldoc_test_*.
---
--- require_role() only consults the pg_read_server_files/
--- pg_execute_server_program/pg_write_server_files predefined roles from
--- PG 11 onward -- they don't exist before that, and the C code falls
--- back to a plain superuser() check instead (see the PG_VERSION_NUM
--- guard around PGHTMLDOC_ROLE_* in pg_htmldoc.c). So grant the roles
--- when they exist, and make htmldoc_test_full a superuser when they
--- don't -- either way it ends up satisfying whichever check
--- require_role() actually performs here.
---
--- Both roles need LOGIN: the pg_htmldoc.whitelist tests below need to \c
--- into them directly, since ALTER ROLE ... SET only takes effect for a new
+-- pg_htmldoc.c gates the pg_write_server_files-equivalent write path,
+-- htmldoc_addhtml(), and the whitelist-bypass "privileged" flag entirely on
+-- superuser() (see require_superuser()/htmldoc_addfile()/htmldoc_addurl()
+-- in pg_htmldoc.c) -- no predefined-role membership is consulted at all.
+-- This session (pg_htmldoc_test_orig_user, captured below) is a superuser,
+-- so it exercises the privileged path directly, with no role setup needed.
+-- One additional role, genuinely non-superuser, is used below for the
+-- unprivileged/whitelist path -- it needs LOGIN, since those tests need to
+-- \c into it directly (ALTER ROLE ... SET only takes effect for a new
 -- connection as that role, not retroactively via SET ROLE in an
--- already-open session.
+-- already-open session).
+SELECT current_user AS pg_htmldoc_test_orig_user \gset
 CREATE ROLE htmldoc_test_none LOGIN;
-CREATE ROLE htmldoc_test_full LOGIN;
-DO $$
-BEGIN
-    IF current_setting('server_version_num')::int >= 110000 THEN
-        EXECUTE 'GRANT pg_read_server_files TO htmldoc_test_full';
-        EXECUTE 'GRANT pg_execute_server_program TO htmldoc_test_full';
-        EXECUTE 'GRANT pg_write_server_files TO htmldoc_test_full';
-    ELSE
-        EXECUTE 'ALTER ROLE htmldoc_test_full SUPERUSER';
-    END IF;
-END
-$$;
 --
 -- No document queued: convert2pdf()/convert2pdf(file)/convert2ps()/
 -- convert2ps(file) all check for a queued document before anything
--- else -- before even require_role() or the NULL-argument check --
+-- else -- before even require_superuser() or the NULL-argument check --
 -- so calling any of them with nothing queued yet must fail with the
--- same "!document" internal error regardless of call form or role.
--- Use the privileged role so the error can't be mistaken for a
--- permission denial.
+-- same "!document" internal error regardless of call form.
 --
-SET ROLE htmldoc_test_full;
 SELECT convert2pdf();
 ERROR:  !document
 SELECT convert2pdf('/tmp/pg_htmldoc_test_no_document.pdf');
@@ -48,18 +27,17 @@ SELECT convert2ps();
 ERROR:  !document
 SELECT convert2ps('/tmp/pg_htmldoc_test_no_document.ps');
 ERROR:  !document
-RESET ROLE;
 --
--- Without either predefined role, every entry point must be denied by
--- default (no pg_htmldoc.whitelist is configured for htmldoc_test_none
--- yet): the render pipeline can resolve <img>/<body background>/<embed>
--- references (and htmldoc_addfile/htmldoc_addurl arguments) to either a
--- local file or a URL fetch, regardless of which function was called.
+-- Without superuser, every entry point must be denied by default (no
+-- pg_htmldoc.whitelist is configured for htmldoc_test_none yet): the
+-- render pipeline can resolve <img>/<body background>/<embed> references
+-- (and htmldoc_addfile/htmldoc_addurl arguments) to either a local file
+-- or a URL fetch, regardless of which function was called.
 --
 SET ROLE htmldoc_test_none;
 SELECT htmldoc_addhtml('<html><body>no privilege</body></html>');
-ERROR:  permission denied to use htmldoc_addhtml (HTML may reference a local file via img/body/embed)
-DETAIL:  Only roles with privileges of the "pg_read_server_files" role may use htmldoc_addhtml (HTML may reference a local file via img/body/embed).
+ERROR:  permission denied to use htmldoc_addhtml (HTML may reference a local file or URL via img/body/embed)
+DETAIL:  Only superuser may use htmldoc_addhtml (HTML may reference a local file or URL via img/body/embed).
 SELECT htmldoc_addfile('/etc/hostname');
 ERROR:  permission denied to access "/etc/hostname"
 DETAIL:  whitelist does not permit this file or URL for the current role.
@@ -70,18 +48,17 @@ RESET ROLE;
 --
 -- htmldoc_addfile()/htmldoc_addurl() name a single concrete file/URL up
 -- front, so pg_htmldoc.whitelist can grant htmldoc_test_none access despite
--- it holding neither predefined role -- the whitelist becomes its only
--- authorization for that specific file/URL, rather than merely narrowing an
--- already-privileged role the way it does for htmldoc_test_full further
--- down. htmldoc_addhtml() has no equivalent: whatever local files or URLs
--- its HTML ends up referencing are resolved deep inside libhtmldoc's
--- rendering pipeline, never through a point pg_htmldoc.whitelist can see,
--- so both predefined roles stay mandatory for it regardless of whitelist
--- (confirmed above). Needs \c, like the htmldoc_test_full whitelist tests
--- further down, since ALTER ROLE ... SET doesn't apply retroactively via
--- SET ROLE in this already-open session.
+-- it not being superuser -- the whitelist becomes its only authorization
+-- for that specific file/URL, rather than merely narrowing an
+-- already-privileged caller the way it does for a superuser further down.
+-- htmldoc_addhtml() has no equivalent: whatever local files or URLs its
+-- HTML ends up referencing are resolved deep inside libhtmldoc's rendering
+-- pipeline, never through a point pg_htmldoc.whitelist can see, so
+-- superuser stays mandatory for it regardless of whitelist (confirmed
+-- above). Needs \c, like the whitelist tests further down, since
+-- ALTER ROLE ... SET doesn't apply retroactively via SET ROLE in this
+-- already-open session.
 --
-SELECT current_user AS pg_htmldoc_test_orig_user \gset
 ALTER ROLE htmldoc_test_none SET pg_htmldoc.whitelist = 'file:///etc/hostname';
 \c - htmldoc_test_none
 SELECT htmldoc_addfile('/etc/hostname');
@@ -111,66 +88,56 @@ DETAIL:  whitelist does not permit this file or URL for the current role.
 \c - :pg_htmldoc_test_orig_user
 ALTER ROLE htmldoc_test_none RESET pg_htmldoc.whitelist;
 --
--- Build a real document as the fully-privileged role, then confirm the
--- unprivileged role still can't write it to a server file, and that the
--- privileged role can.
+-- Build a real document as superuser, then confirm the unprivileged role
+-- still can't write it to a server file, and that superuser can.
 --
-SET ROLE htmldoc_test_full;
 SELECT htmldoc_addhtml('<html><body><h1>pg_htmldoc regression test</h1></body></html>');
  htmldoc_addhtml 
 -----------------
  t
 (1 row)
 
-RESET ROLE;
 SET ROLE htmldoc_test_none;
 SELECT convert2pdf('/tmp/pg_htmldoc_test_denied.pdf');
 ERROR:  permission denied to write htmldoc output to a server file
-DETAIL:  Only roles with privileges of the "pg_write_server_files" role may write htmldoc output to a server file.
+DETAIL:  Only superuser may write htmldoc output to a server file.
 RESET ROLE;
-SET ROLE htmldoc_test_full;
 SELECT convert2pdf('/tmp/pg_htmldoc_test_out.pdf');
  convert2pdf 
 -------------
  t
 (1 row)
 
-RESET ROLE;
 --
 -- convert2ps(file text) -- the file-output variant of convert2ps(),
 -- as opposed to the bytea-returning convert2ps() exercised below --
 -- was never exercised at all, unlike its convert2pdf(file) sibling
 -- above. Mirror the same denied/success pair for it.
 --
-SET ROLE htmldoc_test_full;
 SELECT htmldoc_addhtml('<html><body>ps file test</body></html>');
  htmldoc_addhtml 
 -----------------
  t
 (1 row)
 
-RESET ROLE;
 SET ROLE htmldoc_test_none;
 SELECT convert2ps('/tmp/pg_htmldoc_test_denied.ps');
 ERROR:  permission denied to write htmldoc output to a server file
-DETAIL:  Only roles with privileges of the "pg_write_server_files" role may write htmldoc output to a server file.
+DETAIL:  Only superuser may write htmldoc output to a server file.
 RESET ROLE;
-SET ROLE htmldoc_test_full;
 SELECT convert2ps('/tmp/pg_htmldoc_test_out.ps');
  convert2ps 
 ------------
  t
 (1 row)
 
-RESET ROLE;
 --
 -- htmldoc_addfile() was, until now, only ever exercised for its denial
--- (via the htmldoc_test_none block above) -- its success path for the
--- privileged role was never actually run. Confirm it end-to-end via
+-- (via the htmldoc_test_none block above) -- its success path for
+-- superuser was never actually run. Confirm it end-to-end via
 -- the in-memory (bytea) output path, same as the addurl/addhtml
 -- checks below.
 --
-SET ROLE htmldoc_test_full;
 SELECT htmldoc_addfile('/etc/hostname');
  htmldoc_addfile 
 -----------------
@@ -183,7 +150,6 @@ SELECT octet_length(convert2pdf()) > 100 AS addfile_pdf_nonempty;
  t
 (1 row)
 
-RESET ROLE;
 --
 -- htmldoc_addfile() with a path that resolves locally (no "http:"/
 -- "https:"/"//" prefix) but doesn't exist on disk: file_find() (in
@@ -191,17 +157,14 @@ RESET ROLE;
 -- surfaces that as its own internal error rather than silently doing
 -- nothing.
 --
-SET ROLE htmldoc_test_full;
 SELECT htmldoc_addfile('/nonexistent/pg_htmldoc_test_missing_file');
 ERROR:  !file_find("", "/nonexistent/pg_htmldoc_test_missing_file")
-RESET ROLE;
 --
 -- htmldoc_addurl() resolves a plain local path exactly the way
 -- htmldoc_addfile() does (no "http:"/"https:"/"//" prefix), so it needs
--- both roles too; confirm success end-to-end via the in-memory (bytea)
+-- superuser too; confirm success end-to-end via the in-memory (bytea)
 -- output path, for both PDF and PS.
 --
-SET ROLE htmldoc_test_full;
 SELECT htmldoc_addurl('/etc/hostname');
  htmldoc_addurl 
 ----------------
@@ -226,7 +189,6 @@ SELECT octet_length(convert2ps()) > 100 AS ps_nonempty;
  t
 (1 row)
 
-RESET ROLE;
 --
 -- Multiple add* calls before a single convert* chain their documents
 -- together (via document->next/->prev, set up identically in
@@ -242,7 +204,6 @@ RESET ROLE;
 -- since compressed PDF content can contain embedded NUL bytes that
 -- text values can't hold.
 --
-SET ROLE htmldoc_test_full;
 DO $$
 DECLARE
     needle bytea := convert_to('/Type/Page', 'LATIN1');
@@ -280,7 +241,6 @@ BEGIN
     END IF;
 END
 $$;
-RESET ROLE;
 --
 -- Cleanup on rollback: an add* call that fails *after* a document has
 -- already been chained onto `document` and its MemoryContextCallback
@@ -296,11 +256,8 @@ RESET ROLE;
 -- exactly that path: fopen() in read_fileurl() is the only failure
 -- point left after the tree is chained in.
 --
-SET ROLE htmldoc_test_full;
 SELECT htmldoc_addfile('/etc/shadow');
 ERROR:  !fopen("/etc/shadow")
-RESET ROLE;
-SET ROLE htmldoc_test_full;
 DO $$
 BEGIN
     IF current_setting('server_version_num')::int >= 90500 THEN
@@ -315,32 +272,23 @@ BEGIN
     END IF;
 END
 $$;
-RESET ROLE;
 --
--- pg_htmldoc.whitelist (see the pg_whitelist submodule) adds an optional,
--- per-role restriction on top of the pg_read_server_files/
--- pg_execute_server_program checks above: even htmldoc_test_full, which
--- holds both, can be scoped down to specific file:// / http(s):// prefixes.
--- ALTER ROLE ... SET only takes effect for a *new* connection as that role
--- (role-level GUC defaults are applied once, in InitPostgres, at backend
--- startup) -- unlike the plain role-membership checks above, SET ROLE
--- within this already-open session will NOT pick it up, so exercising it
--- means reconnecting via \c (hence htmldoc_test_full needing LOGIN;
--- pg_htmldoc_test_orig_user was already captured above).
+-- pg_htmldoc.whitelist (see the pg_whitelist submodule) adds an optional
+-- restriction on top of the superuser check above: even a superuser can be
+-- scoped down to specific file:// / http(s):// prefixes. pg_htmldoc.whitelist
+-- is registered PGC_SUSET, so a superuser session can enable it with a
+-- plain SET -- no reconnect needed, unlike the role-level defaults used for
+-- htmldoc_test_none elsewhere in this file.
 --
 --
 -- An exact file:// entry permits only that file.
 --
-ALTER ROLE htmldoc_test_full SET pg_htmldoc.whitelist = 'file:///etc/hostname';
-\c - htmldoc_test_full
---
--- pg_htmldoc.so isn't actually loaded into this fresh backend yet -- that
--- only happens on the first call into it, below -- so pg_htmldoc.whitelist
--- is still just an unenforced placeholder GUC at this point, not yet
--- reconciled with the PGC_SUSET definition pg_whitelist_init() registers.
--- The PGC_SUSET check further down deliberately runs after this, once the
--- module (and the real GUC definition) is guaranteed to be loaded.
---
+SELECT set_config('pg_htmldoc.whitelist', 'file:///etc/hostname', false);
+      set_config      
+----------------------
+ file:///etc/hostname
+(1 row)
+
 SELECT htmldoc_addfile('/etc/hostname');
  htmldoc_addfile 
 -----------------
@@ -353,30 +301,6 @@ SELECT octet_length(convert2pdf()) > 100 AS whitelist_exact_match_pdf_nonempty;
  t
 (1 row)
 
---
--- pg_htmldoc.whitelist is registered PGC_SUSET, so only a superuser can set
--- it -- confirm that htmldoc_test_full, connected directly (not merely SET
--- ROLE'd) and thus genuinely non-superuser, still can't loosen its own
--- scope with a plain SET. Wrapped in a DO block guarded by version,
--- mirroring the cleanup-on-rollback check earlier in this file, because
--- pre-PG11 htmldoc_test_full is made an actual superuser instead of merely
--- holding the predefined roles (see the role setup at the top of this
--- file), so the plain SET would legitimately succeed there -- a DO block's
--- own output ("DO") stays identical across versions either way, since the
--- mismatch (if any) is what gets raised, not the version check itself.
---
-DO $$
-BEGIN
-    IF current_setting('server_version_num')::int >= 110000 THEN
-        BEGIN
-            PERFORM set_config('pg_htmldoc.whitelist', 'file:///etc/passwd', false);
-            RAISE EXCEPTION 'htmldoc_test_full was able to loosen its own pg_htmldoc.whitelist with a plain SET';
-        EXCEPTION WHEN insufficient_privilege THEN
-            NULL;
-        END;
-    END IF;
-END
-$$;
 SELECT htmldoc_addfile('/etc/passwd');
 ERROR:  permission denied to access "/etc/passwd"
 DETAIL:  whitelist does not permit this file or URL for the current role.
@@ -386,9 +310,12 @@ DETAIL:  whitelist does not permit this file or URL for the current role.
 -- comparison, so ".." can't be used to climb back out of it even though the
 -- raw string would otherwise start with the whitelisted prefix.
 --
-\c - :pg_htmldoc_test_orig_user
-ALTER ROLE htmldoc_test_full SET pg_htmldoc.whitelist = 'file:///etc/ssl/';
-\c - htmldoc_test_full
+SELECT set_config('pg_htmldoc.whitelist', 'file:///etc/ssl/', false);
+    set_config    
+------------------
+ file:///etc/ssl/
+(1 row)
+
 SELECT htmldoc_addfile('/etc/ssl/openssl.cnf');
  htmldoc_addfile 
 -----------------
@@ -418,26 +345,74 @@ DETAIL:  whitelist does not permit this file or URL for the current role.
 -- for -- and it would take a while doing it too, since htmldoc's HTTP
 -- client retries with real connect timeouts.
 --
-\c - :pg_htmldoc_test_orig_user
-ALTER ROLE htmldoc_test_full SET pg_htmldoc.whitelist = 'https://example.com/';
-\c - htmldoc_test_full
+SELECT set_config('pg_htmldoc.whitelist', 'https://example.com/', false);
+      set_config      
+----------------------
+ https://example.com/
+(1 row)
+
 SELECT htmldoc_addurl('http://192.0.2.1/forbidden');
 ERROR:  permission denied to access "http://192.0.2.1/forbidden"
 DETAIL:  whitelist does not permit this file or URL for the current role.
+SELECT set_config('pg_htmldoc.whitelist', '', false);
+ set_config 
+------------
+ 
+(1 row)
+
+--
+-- pg_htmldoc.whitelist is registered PGC_SUSET, so only a superuser can set
+-- it -- confirm that htmldoc_test_none, connected directly (not merely SET
+-- ROLE'd) and thus genuinely non-superuser, can't loosen its own scope with
+-- a plain SET.
+--
+ALTER ROLE htmldoc_test_none SET pg_htmldoc.whitelist = 'file:///etc/hostname';
+\c - htmldoc_test_none
+--
+-- pg_htmldoc.so isn't actually loaded into this fresh backend yet -- that
+-- only happens on the first call into it, below -- so pg_htmldoc.whitelist
+-- is still just an unenforced placeholder GUC at this point, not yet
+-- reconciled with the PGC_SUSET definition pg_whitelist_init() registers.
+-- The PGC_SUSET check further down deliberately runs after this, once the
+-- module (and the real GUC definition) is guaranteed to be loaded.
+--
+SELECT htmldoc_addfile('/etc/hostname');
+ htmldoc_addfile 
+-----------------
+ t
+(1 row)
+
+SELECT octet_length(convert2pdf()) > 100 AS whitelist_reconnect_pdf_nonempty;
+ whitelist_reconnect_pdf_nonempty 
+----------------------------------
+ t
+(1 row)
+
+DO $$
+BEGIN
+    BEGIN
+        PERFORM set_config('pg_htmldoc.whitelist', 'file:///etc/passwd', false);
+        RAISE EXCEPTION 'htmldoc_test_none was able to loosen its own pg_htmldoc.whitelist with a plain SET';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+END
+$$;
+SELECT htmldoc_addfile('/etc/passwd');
+ERROR:  permission denied to access "/etc/passwd"
+DETAIL:  whitelist does not permit this file or URL for the current role.
 \c - :pg_htmldoc_test_orig_user
-ALTER ROLE htmldoc_test_full RESET pg_htmldoc.whitelist;
+ALTER ROLE htmldoc_test_none RESET pg_htmldoc.whitelist;
 --
 -- Required arguments: htmldoc_addhtml/addfile/addurl and the
 -- file-output convert2pdf(file)/convert2ps(file) all reject a NULL
 -- argument outright. The PG_ARGISNULL(0) check runs before
--- require_role() in every one of them, so a privileged role sees the
--- same ERRCODE_NULL_VALUE_NOT_ALLOWED error an unprivileged one
--- would -- this isolates the NULL check from the permission check.
--- convert2pdf/convert2ps need a document already queued to reach
--- their own NULL check instead of the (separate, untested) "no
--- document queued" error, hence the addhtml() in between.
+-- require_superuser() in every one of them, so this isolates the
+-- NULL check from the permission check. convert2pdf/convert2ps need
+-- a document already queued to reach their own NULL check instead of
+-- the (separate, untested) "no document queued" error, hence the
+-- addhtml() in between.
 --
-SET ROLE htmldoc_test_full;
 SELECT htmldoc_addhtml(NULL);
 ERROR:  htmldoc_addhtml requires argument html
 SELECT htmldoc_addfile(NULL);
@@ -454,7 +429,5 @@ SELECT convert2pdf(NULL);
 ERROR:  htmldoc requires argument file
 SELECT convert2ps(NULL);
 ERROR:  htmldoc requires argument file
-RESET ROLE;
 DROP ROLE htmldoc_test_none;
-DROP ROLE htmldoc_test_full;
 DROP EXTENSION pg_htmldoc;
