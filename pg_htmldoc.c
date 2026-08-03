@@ -37,14 +37,17 @@ PG_MODULE_MAGIC;
 #define PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM InvalidOid
 #endif
 
-static void require_role(Oid role, const char *rolename, const char *action) {
+static bool has_role(Oid role) {
 #if PG_VERSION_NUM >= 110000
-    if (!has_privs_of_role(GetUserId(), role))
+    return has_privs_of_role(GetUserId(), role);
 #else
     (void)role;
-    if (!superuser())
+    return superuser();
 #endif
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied to %s", action), errdetail("Only roles with privileges of the \"%s\" role may %s.", rolename, action)));
+}
+
+static void require_role(bool has, const char *rolename, const char *action) {
+    if (!has) ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied to %s", action), errdetail("Only roles with privileges of the \"%s\" role may %s.", rolename, action)));
 }
 
 static bool cleanup = false;
@@ -88,17 +91,17 @@ static void documentMemoryContextCallbackFunction(void *arg) {
 }
 #endif
 
-static void read_fileurl(tree_t **document, const char *fileurl, const char *path) {
+static void read_fileurl(tree_t **document, const char *fileurl, const char *path, bool privileged) {
     const char *base;
     const char *realname;
     FILE *in;
     tree_t *file;
-    pg_whitelist_check_url(fileurl);
+    pg_whitelist_check_url(fileurl, privileged);
     base = file_directory(fileurl);
     realname = file_find(path, fileurl);
     if (!base) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_directory(\"%s\")", fileurl)));
     if (!realname) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_find(\"%s\", \"%s\")", path, fileurl)));
-    pg_whitelist_check_local(fileurl, realname);
+    pg_whitelist_check_local(fileurl, realname, privileged);
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
     if (!*document) *document = file; else {
@@ -158,7 +161,7 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
         default: {
             char *file;
             if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc requires argument file")));
-            require_role(PGHTMLDOC_ROLE_WRITE_SERVER_FILES, "pg_write_server_files", "write htmldoc output to a server file");
+            require_role(has_role(PGHTMLDOC_ROLE_WRITE_SERVER_FILES), "pg_write_server_files", "write htmldoc output to a server file");
             file = TextDatumGetCString(PG_GETARG_DATUM(0));
             if (!(out = fopen(file, "wb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", file)));
             pfree(file);
@@ -180,14 +183,25 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
     }
 }
 
+/* Unlike htmldoc_addhtml() below, htmldoc_addfile()/htmldoc_addurl() name a
+ * single concrete file/URL up front, so a role missing one or both of the
+ * predefined roles isn't refused outright: read_fileurl() -> pg_whitelist_
+ * check_url()/check_local() still admit it if pg_htmldoc.whitelist
+ * explicitly grants that specific file/URL, treating the whitelist as an
+ * alternative grant rather than only a narrowing of an already-privileged
+ * role. htmldoc_addhtml() can't offer the same: whatever local files or
+ * URLs its HTML ends up referencing (img/body/embed) are resolved deep
+ * inside libhtmldoc's rendering pipeline, never through read_fileurl(), so
+ * there's no specific file/URL here to check the whitelist against -- both
+ * predefined roles remain mandatory for it. */
 EXTENSION(htmldoc_addfile) {
     char *file;
+    bool privileged;
     cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addfile requires argument file")));
-    require_role(PGHTMLDOC_ROLE_READ_SERVER_FILES, "pg_read_server_files", "use htmldoc_addfile (may resolve to a local file)");
-    require_role(PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM, "pg_execute_server_program", "use htmldoc_addfile (may resolve to a URL fetch)");
+    privileged = has_role(PGHTMLDOC_ROLE_READ_SERVER_FILES) && has_role(PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM);
     file = TextDatumGetCString(PG_GETARG_DATUM(0));
-    read_fileurl(&document, file, Path);
+    read_fileurl(&document, file, Path, privileged);
     pfree(file);
     cleanup = false;
     PG_RETURN_BOOL(true);
@@ -197,8 +211,8 @@ EXTENSION(htmldoc_addhtml) {
     text *html;
     cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addhtml requires argument html")));
-    require_role(PGHTMLDOC_ROLE_READ_SERVER_FILES, "pg_read_server_files", "use htmldoc_addhtml (HTML may reference a local file via img/body/embed)");
-    require_role(PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM, "pg_execute_server_program", "use htmldoc_addhtml (HTML may reference a URL via img/body/embed)");
+    require_role(has_role(PGHTMLDOC_ROLE_READ_SERVER_FILES), "pg_read_server_files", "use htmldoc_addhtml (HTML may reference a local file via img/body/embed)");
+    require_role(has_role(PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM), "pg_execute_server_program", "use htmldoc_addhtml (HTML may reference a URL via img/body/embed)");
     html = PG_GETARG_TEXT_PP(0);
     read_html(&document, VARDATA_ANY(html), VARSIZE_ANY_EXHDR(html));
     PG_FREE_IF_COPY(html, 0);
@@ -208,12 +222,12 @@ EXTENSION(htmldoc_addhtml) {
 
 EXTENSION(htmldoc_addurl) {
     char *url;
+    bool privileged;
     cleanup = true;
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addurl requires argument url")));
-    require_role(PGHTMLDOC_ROLE_READ_SERVER_FILES, "pg_read_server_files", "use htmldoc_addurl (may resolve to a local file)");
-    require_role(PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM, "pg_execute_server_program", "fetch a URL with htmldoc_addurl");
+    privileged = has_role(PGHTMLDOC_ROLE_READ_SERVER_FILES) && has_role(PGHTMLDOC_ROLE_EXECUTE_SERVER_PROGRAM);
     url = TextDatumGetCString(PG_GETARG_DATUM(0));
-    read_fileurl(&document, url, NULL);
+    read_fileurl(&document, url, NULL, privileged);
     pfree(url);
     cleanup = false;
     PG_RETURN_BOOL(true);

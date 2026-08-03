@@ -14,12 +14,11 @@ CREATE EXTENSION pg_htmldoc;
 -- don't -- either way it ends up satisfying whichever check
 -- require_role() actually performs here.
 --
--- htmldoc_test_full needs LOGIN (unlike htmldoc_test_none, only ever
--- used via SET ROLE): the pg_htmldoc.whitelist tests below need to
--- \c into it directly, since ALTER ROLE ... SET only takes effect for
--- a new connection as that role, not retroactively via SET ROLE in an
+-- Both roles need LOGIN: the pg_htmldoc.whitelist tests below need to \c
+-- into them directly, since ALTER ROLE ... SET only takes effect for a new
+-- connection as that role, not retroactively via SET ROLE in an
 -- already-open session.
-CREATE ROLE htmldoc_test_none;
+CREATE ROLE htmldoc_test_none LOGIN;
 CREATE ROLE htmldoc_test_full LOGIN;
 DO $$
 BEGIN
@@ -50,16 +49,50 @@ SELECT convert2ps('/tmp/pg_htmldoc_test_no_document.ps');
 RESET ROLE;
 
 --
--- Without either predefined role, every entry point must be denied: the
--- render pipeline can resolve <img>/<body background>/<embed> references
--- (and htmldoc_addfile/htmldoc_addurl arguments) to either a local file
--- or a URL fetch, regardless of which function was called.
+-- Without either predefined role, every entry point must be denied by
+-- default (no pg_htmldoc.whitelist is configured for htmldoc_test_none
+-- yet): the render pipeline can resolve <img>/<body background>/<embed>
+-- references (and htmldoc_addfile/htmldoc_addurl arguments) to either a
+-- local file or a URL fetch, regardless of which function was called.
 --
 SET ROLE htmldoc_test_none;
 SELECT htmldoc_addhtml('<html><body>no privilege</body></html>');
 SELECT htmldoc_addfile('/etc/hostname');
 SELECT htmldoc_addurl('/etc/hostname');
 RESET ROLE;
+
+--
+-- htmldoc_addfile()/htmldoc_addurl() name a single concrete file/URL up
+-- front, so pg_htmldoc.whitelist can grant htmldoc_test_none access despite
+-- it holding neither predefined role -- the whitelist becomes its only
+-- authorization for that specific file/URL, rather than merely narrowing an
+-- already-privileged role the way it does for htmldoc_test_full further
+-- down. htmldoc_addhtml() has no equivalent: whatever local files or URLs
+-- its HTML ends up referencing are resolved deep inside libhtmldoc's
+-- rendering pipeline, never through a point pg_htmldoc.whitelist can see,
+-- so both predefined roles stay mandatory for it regardless of whitelist
+-- (confirmed above). Needs \c, like the htmldoc_test_full whitelist tests
+-- further down, since ALTER ROLE ... SET doesn't apply retroactively via
+-- SET ROLE in this already-open session.
+--
+SELECT current_user AS pg_htmldoc_test_orig_user \gset
+ALTER ROLE htmldoc_test_none SET pg_htmldoc.whitelist = 'file:///etc/hostname';
+\c - htmldoc_test_none
+
+SELECT htmldoc_addfile('/etc/hostname');
+SELECT octet_length(convert2pdf()) > 100 AS whitelist_grants_unprivileged_pdf_nonempty;
+SELECT htmldoc_addfile('/etc/passwd');
+
+--
+-- Still enforced *before* the fetch for the unprivileged-via-whitelist path
+-- too: htmldoc_test_none's whitelist above has no http(s):// entry at all,
+-- so this is rejected without ever attempting to reach 192.0.2.1 (the RFC
+-- 5737 reserved, non-routable documentation range).
+--
+SELECT htmldoc_addurl('http://192.0.2.1/forbidden');
+
+\c - :pg_htmldoc_test_orig_user
+ALTER ROLE htmldoc_test_none RESET pg_htmldoc.whitelist;
 
 --
 -- Build a real document as the fully-privileged role, then confirm the
@@ -232,9 +265,9 @@ RESET ROLE;
 -- (role-level GUC defaults are applied once, in InitPostgres, at backend
 -- startup) -- unlike the plain role-membership checks above, SET ROLE
 -- within this already-open session will NOT pick it up, so exercising it
--- means reconnecting via \c (hence htmldoc_test_full needing LOGIN).
+-- means reconnecting via \c (hence htmldoc_test_full needing LOGIN;
+-- pg_htmldoc_test_orig_user was already captured above).
 --
-SELECT current_user AS pg_htmldoc_test_orig_user \gset
 
 --
 -- An exact file:// entry permits only that file.
