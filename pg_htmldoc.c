@@ -18,15 +18,16 @@ PG_MODULE_MAGIC;
 
 /* pg_whitelist's "privileged" caller is a superuser; anyone else must be
  * granted access explicitly via pg_htmldoc.whitelist. Writing htmldoc
- * output to a server file, and htmldoc_addhtml() (whose HTML may reference
- * local files/URLs deep inside libhtmldoc's rendering pipeline, with no
- * specific file/URL here for pg_whitelist to check), have no whitelist
- * alternative and so require superuser unconditionally. */
+ * output to a server file, and htmldoc_addhtml() (whose markup comes straight
+ * from the caller, with no file/URL for pg_whitelist to grant), have no
+ * whitelist alternative and so require superuser unconditionally. */
 static void require_superuser(const char *action) {
     if (!superuser()) ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied to %s", action), errdetail("Only superuser may %s.", action)));
 }
 
 static bool cleanup = false;
+static bool denied = false;
+static bool privileged = false;
 static tree_t *document = NULL;
 
 /* libhtmldoc's htmlReadFile(tree_t *, FILE *, const char *) collides by name
@@ -48,11 +49,47 @@ static tree_t *document = NULL;
 typedef tree_t *(*htmlReadFile_fn)(tree_t *parent, FILE *fp, const char *base);
 static htmlReadFile_fn real_htmlReadFile = NULL;
 
+/* read_fileurl()'s whitelist checks only cover the one file/URL named in the
+ * function argument. Everything a document goes on to reference -- <img>,
+ * <body background>, <embed>, and every hop of an HTTP redirect -- is resolved
+ * inside libhtmldoc's file_find(), which read_fileurl() never sees, and image
+ * fetching happens later still, during convert2pdf/convert2ps. file_callback()
+ * reports each of those accesses instead, so the whitelist covers them too.
+ *
+ * The verdict is returned rather than raised: ereport(ERROR) from here would
+ * longjmp out of libhtmldoc's C++ call stack, skipping destructors and leaving
+ * its HTTP connection and temporary files behind. Returning 0 makes
+ * file_find() fail the access cleanly and report it itself. */
+static int fileCallbackFunction(void *data, hd_file_event_t event, const char *url, const char *localname, int status) {
+    bool allowed;
+    switch (event) {
+        /* A "data:" URI is content inlined in the document that referenced it:
+         * no file is read and no host is contacted. */
+        case HD_FILE_DATA: allowed = true; break;
+        /* The request that produced this was already vetted below. */
+        case HD_FILE_RESULT: allowed = true; break;
+        /* url is reassembled from the host httpSeparateURI() actually parsed
+         * out, so the userinfo tricks pg_whitelist_url_prefix() guards against
+         * can't reach it, and each redirect hop comes back here as a fresh
+         * HD_FILE_REQUEST before anything is sent. */
+        case HD_FILE_REQUEST: case HD_FILE_REDIRECT: allowed = pg_whitelist_allows_url(url, privileged); break;
+        /* Either a candidate local path (url == localname), or a URL already
+         * in the web cache (localname is its temporary file). Each check
+         * passes what isn't its kind, so the pair dispatches on url. */
+        case HD_FILE_LOCAL: case HD_FILE_CACHE: allowed = pg_whitelist_allows_url(url, privileged) && pg_whitelist_allows_local(url, localname ? localname : url, privileged); break;
+        default: allowed = false; break;
+    }
+    /* Only ever set here; read_fileurl() clears it before asking file_find(). */
+    if (!allowed) denied = true;
+    return allowed ? 1 : 0;
+}
+
 void _PG_init(void); void _PG_init(void) {
     void *handle;
     if (!(handle = dlopen("libhtmldoc.so", RTLD_NOW | RTLD_NOLOAD))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!dlopen(\"libhtmldoc.so\"): %s", dlerror())));
     if (!(real_htmlReadFile = (htmlReadFile_fn)dlsym(handle, "htmlReadFile"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!dlsym(\"htmlReadFile\"): %s", dlerror())));
     if (!_htmlInitialized) htmlSetCharSet("utf-8");
+    file_callback(fileCallbackFunction, NULL);
     pg_whitelist_init("pg_htmldoc.whitelist");
 }
 
@@ -67,15 +104,19 @@ static void documentMemoryContextCallbackFunction(void *arg) {
 }
 #endif
 
-static void read_fileurl(tree_t **document, const char *fileurl, const char *path, bool privileged) {
+static void read_fileurl(tree_t **document, const char *fileurl, const char *path) {
     const char *base;
     const char *realname;
     FILE *in;
     tree_t *file;
     pg_whitelist_check_url(fileurl, privileged);
     base = file_directory(fileurl);
+    denied = false;
     realname = file_find(path, fileurl);
     if (!base) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_directory(\"%s\")", fileurl)));
+    /* file_find() reports a refusal from fileCallbackFunction() the same way it
+     * reports a missing file, and the refusal is the more useful of the two. */
+    if (!realname && denied) pg_whitelist_deny(fileurl);
     if (!realname) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_find(\"%s\", \"%s\")", path, fileurl)));
     pg_whitelist_check_local(fileurl, realname, privileged);
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
@@ -132,6 +173,7 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
     size_t output_len = 0;
     FILE *out;
     cleanup = true;
+    privileged = superuser();
     if (!document) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!document")));
     while (document && document->prev) document = document->prev;
     htmlFixLinks(document, document, 0);
@@ -170,25 +212,22 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
     }
 }
 
-/* Unlike htmldoc_addhtml() below, htmldoc_addfile()/htmldoc_addurl() name a
- * single concrete file/URL up front, so a non-superuser caller isn't
- * refused outright: read_fileurl() -> pg_whitelist_check_url()/check_local()
- * still admit it if pg_htmldoc.whitelist explicitly grants that specific
- * file/URL, treating the whitelist as an alternative grant rather than only
- * a narrowing of an already-privileged caller. htmldoc_addhtml() can't offer
- * the same: whatever local files or URLs its HTML ends up referencing
- * (img/body/embed) are resolved deep inside libhtmldoc's rendering
- * pipeline, never through read_fileurl(), so there's no specific file/URL
- * here to check the whitelist against -- superuser remains mandatory for
- * it. */
+/* htmldoc_addfile()/htmldoc_addurl() name a single concrete file/URL up front,
+ * so a non-superuser caller isn't refused outright: read_fileurl() ->
+ * pg_whitelist_check_url()/check_local() still admit it if
+ * pg_htmldoc.whitelist explicitly grants that specific file/URL, treating the
+ * whitelist as an alternative grant rather than only a narrowing of an
+ * already-privileged caller. Whatever the document then references is covered
+ * by fileCallbackFunction() above. htmldoc_addhtml() takes its markup straight
+ * from the caller with no file/URL to grant at all, so superuser stays
+ * mandatory for it. */
 EXTENSION(htmldoc_addfile) {
     char *file;
-    bool privileged;
     cleanup = true;
-    if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addfile requires argument file")));
     privileged = superuser();
+    if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addfile requires argument file")));
     file = TextDatumGetCString(PG_GETARG_DATUM(0));
-    read_fileurl(&document, file, Path, privileged);
+    read_fileurl(&document, file, Path);
     pfree(file);
     cleanup = false;
     PG_RETURN_BOOL(true);
@@ -197,6 +236,7 @@ EXTENSION(htmldoc_addfile) {
 EXTENSION(htmldoc_addhtml) {
     text *html;
     cleanup = true;
+    privileged = superuser();
     if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addhtml requires argument html")));
     require_superuser("use htmldoc_addhtml (HTML may reference a local file or URL via img/body/embed)");
     html = PG_GETARG_TEXT_PP(0);
@@ -208,12 +248,11 @@ EXTENSION(htmldoc_addhtml) {
 
 EXTENSION(htmldoc_addurl) {
     char *url;
-    bool privileged;
     cleanup = true;
-    if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addurl requires argument url")));
     privileged = superuser();
+    if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc_addurl requires argument url")));
     url = TextDatumGetCString(PG_GETARG_DATUM(0));
-    read_fileurl(&document, url, NULL, privileged);
+    read_fileurl(&document, url, NULL);
     pfree(url);
     cleanup = false;
     PG_RETURN_BOOL(true);
