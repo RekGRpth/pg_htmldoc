@@ -26,7 +26,11 @@ static void require_superuser(const char *action) {
 }
 
 static bool cleanup = false;
-static bool denied = false;
+/* Set by fileCallbackFunction() to whatever it last refused; empty when it has
+ * refused nothing since read_fileurl() cleared it. Sized like the URL and
+ * filename buffers libhtmldoc itself uses, so a longer one was already
+ * truncated before it got here. */
+static char denied_url[1024] = "";
 static bool privileged = false;
 static tree_t *document = NULL;
 
@@ -79,8 +83,10 @@ static int fileCallbackFunction(void *data, hd_file_event_t event, const char *u
         case HD_FILE_LOCAL: case HD_FILE_CACHE: allowed = pg_whitelist_allows_url(url, privileged) && pg_whitelist_allows_local(url, localname ? localname : url, privileged); break;
         default: allowed = false; break;
     }
-    /* Only ever set here; read_fileurl() clears it before asking file_find(). */
-    if (!allowed) denied = true;
+    /* Record what was refused, so read_fileurl() can name it rather than the
+     * argument it started from -- which, after a redirect, is a URL that is
+     * itself permitted. Only ever set here; read_fileurl() clears it. */
+    if (!allowed) strlcpy(denied_url, url, sizeof(denied_url));
     return allowed ? 1 : 0;
 }
 
@@ -111,12 +117,12 @@ static void read_fileurl(tree_t **document, const char *fileurl, const char *pat
     tree_t *file;
     pg_whitelist_check_url(fileurl, privileged);
     base = file_directory(fileurl);
-    denied = false;
+    denied_url[0] = '\0';
     realname = file_find(path, fileurl);
     if (!base) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_directory(\"%s\")", fileurl)));
     /* file_find() reports a refusal from fileCallbackFunction() the same way it
      * reports a missing file, and the refusal is the more useful of the two. */
-    if (!realname && denied) pg_whitelist_deny(fileurl);
+    if (!realname && denied_url[0]) pg_whitelist_deny(denied_url);
     if (!realname) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_find(\"%s\", \"%s\")", path, fileurl)));
     pg_whitelist_check_local(fileurl, realname, privileged);
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
