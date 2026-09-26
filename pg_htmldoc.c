@@ -104,8 +104,10 @@ static int fileCallbackFunction(void *data, hd_file_event_t event, const char *u
         case HD_FILE_REQUEST: case HD_FILE_REDIRECT: allowed = pg_whitelist_allows_url(url, privileged); break;
         /* Either a candidate local path (url == localname), or a URL already
          * in the web cache (localname is its temporary file). Each check
-         * passes what isn't its kind, so the pair dispatches on url. */
-        case HD_FILE_LOCAL: case HD_FILE_CACHE: allowed = pg_whitelist_allows_url(url, privileged) && pg_whitelist_allows_local(url, localname ? localname : url, privileged); break;
+         * passes what isn't its kind, so the pair dispatches on url. A cached
+         * "data:" URI is the same inlined content HD_FILE_DATA let through the
+         * first time, not the local file it happened to be decoded into. */
+        case HD_FILE_LOCAL: case HD_FILE_CACHE: allowed = !strncmp(url, "data:", 5) || (pg_whitelist_allows_url(url, privileged) && pg_whitelist_allows_local(url, localname ? localname : url, privileged)); break;
         default: allowed = false; break;
     }
     /* Record what was refused, so read_fileurl() can name it rather than the

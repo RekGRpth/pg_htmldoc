@@ -242,6 +242,15 @@ SELECT htmldoc_addfile('/tmp/pg_htmldoc_test_img.html');
 SELECT octet_length(convert2pdf()) > 100 AS whitelist_refused_image_pdf_nonempty;
 
 --
+-- A "data:" URI, on the other hand, is content inlined in the document itself,
+-- so the whitelist has nothing to say about it -- not the first time
+-- libhtmldoc decodes it, and not when a repeat of it comes out of libhtmldoc's
+-- cache either: no WARNING here, and no image left out.
+--
+SELECT htmldoc_addhtml('<p>page</p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGM4IWeDFTEMLQkAd2xIgco4MNEAAAAASUVORK5CYII="><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGM4IWeDFTEMLQkAd2xIgco4MNEAAAAASUVORK5CYII=">');
+SELECT octet_length(convert2pdf()) > 100 AS whitelist_data_uri_pdf_nonempty;
+
+--
 -- A file:// entry with a trailing slash permits anything under that
 -- directory, but the resolved path is realpath()-canonicalized before
 -- comparison, so ".." can't be used to climb back out of it even though the
