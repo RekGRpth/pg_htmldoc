@@ -3,6 +3,7 @@
 #include <catalog/pg_type.h>
 #include <dlfcn.h>
 #include <miscadmin.h>
+#include <unistd.h>
 #include <utils/builtins.h>
 #if PG_VERSION_NUM >= 160000
 #include <varatt.h>
@@ -126,6 +127,7 @@ static void read_html(tree_t **document, const char *html, size_t len) {
 }
 
 static Datum htmldoc(PG_FUNCTION_ARGS) {
+    char *file = NULL;
     char *output_data = NULL;
     size_t output_len = 0;
     FILE *out;
@@ -136,21 +138,23 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
     switch (PG_NARGS()) {
         case 0: if (!(out = open_memstream(&output_data, &output_len))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!open_memstream"))); break;
         default: {
-            char *file;
             if (PG_ARGISNULL(0)) ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("htmldoc requires argument file")));
             require_superuser("write htmldoc output to a server file");
             file = TextDatumGetCString(PG_GETARG_DATUM(0));
             if (!(out = fopen(file, "wb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", file)));
-            pfree(file);
         } break;
     }
     if (pspdf_export_out(document, NULL, out)) {
         /* pspdf_export_out() only closes out once it has written the document;
-         * its error returns happen before that, so out is still open here. */
+         * its error returns happen before that, so out is still open here --
+         * and nothing has been written to it, so don't leave the empty file
+         * fopen() created behind either. */
         fclose(out);
         free(output_data);
+        if (file) unlink(file);
         ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("pspdf_export_out failed")));
     }
+    if (file) pfree(file);
     htmlDeleteTree(document);
     file_cleanup();
     image_flush_cache();
