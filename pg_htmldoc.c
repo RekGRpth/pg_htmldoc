@@ -80,9 +80,10 @@ static void read_fileurl(tree_t **document, const char *fileurl, const char *pat
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
     if (!*document) *document = file; else {
-        while ((*document)->next) *document = (*document)->next;
-        (*document)->next = file;
-        file->prev = *document;
+        tree_t *last = *document;
+        while (last->next) last = last->next;
+        last->next = file;
+        file->prev = last;
     }
 #if PG_VERSION_NUM >= 90500
     {
@@ -105,9 +106,10 @@ static void read_html(tree_t **document, const char *html, size_t len) {
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
     if (!(file = htmlAddTree(NULL, MARKUP_FILE, NULL))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!htmlAddTree")));
     if (!*document) *document = file; else {
-        while ((*document)->next) *document = (*document)->next;
-        (*document)->next = file;
-        file->prev = *document;
+        tree_t *last = *document;
+        while (last->next) last = last->next;
+        last->next = file;
+        file->prev = last;
     }
 #if PG_VERSION_NUM >= 90500
     {
