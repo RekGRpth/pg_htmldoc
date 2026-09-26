@@ -80,7 +80,7 @@ Entries are separated by commas, with surrounding whitespace ignored, and matche
 - Hosts are compared exactly as written, so spell them the same way the documents do (normally lowercase).
 - A scheme-relative `//host/...` URL never matches, since every entry names its scheme.
 
-The whitelist covers everything a document goes on to reference, not just the file/URL passed to `htmldoc_addfile()`/`htmldoc_addurl()`: images, `<body background>` and any other file or URL HTMLDOC loads, and every hop of an HTTP redirect, are checked the same way, before any file is opened or any host is contacted. This holds for `htmldoc_addhtml()` markup too, and for images fetched later, during `convert2pdf()`/`convert2ps()` -- judged by the role calling that function. A refusal while resolving the argument itself, including any redirect it leads to, raises `permission denied` naming the file/URL that was actually refused; a refused image is silently left out of the output.
+The whitelist covers everything a document goes on to reference, not just the file/URL passed to `htmldoc_addfile()`/`htmldoc_addurl()`: images, `<body background>` and any other file or URL HTMLDOC loads, and every hop of an HTTP redirect, are checked the same way, before any file is opened or any host is contacted. This holds for `htmldoc_addhtml()` markup too, and for images fetched later, during `convert2pdf()`/`convert2ps()` -- judged by the role calling that function. A refusal while resolving the argument itself, including any redirect it leads to, raises `permission denied` naming the file/URL that was actually refused; a refused image is left out of the output, with a `WARNING` naming it.
 
 ### License
 

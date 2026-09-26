@@ -45,13 +45,11 @@ RESET ROLE;
 -- it not being superuser -- the whitelist becomes its only authorization
 -- for that specific file/URL, rather than merely narrowing an
 -- already-privileged caller the way it does for a superuser further down.
--- htmldoc_addhtml() has no equivalent: whatever local files or URLs its
--- HTML ends up referencing are resolved deep inside libhtmldoc's rendering
--- pipeline, never through a point pg_htmldoc.whitelist can see, so
--- superuser stays mandatory for it regardless of whitelist (confirmed
--- above). Needs \c, like the whitelist tests further down, since
--- ALTER ROLE ... SET doesn't apply retroactively via SET ROLE in this
--- already-open session.
+-- htmldoc_addhtml() has no equivalent: its markup comes straight from the
+-- caller, with no file/URL for pg_htmldoc.whitelist to grant, so superuser
+-- stays mandatory for it regardless of whitelist (confirmed above). Needs
+-- \c, like the whitelist tests further down, since ALTER ROLE ... SET
+-- doesn't apply retroactively via SET ROLE in this already-open session.
 --
 ALTER ROLE htmldoc_test_none SET pg_htmldoc.whitelist = 'file:///etc/hostname';
 \c - htmldoc_test_none
@@ -229,6 +227,19 @@ SELECT set_config('pg_htmldoc.whitelist', 'file:///etc/hostname', false);
 SELECT htmldoc_addfile('/etc/hostname');
 SELECT octet_length(convert2pdf()) > 100 AS whitelist_exact_match_pdf_nonempty;
 SELECT htmldoc_addfile('/etc/passwd');
+
+--
+-- The whitelist also covers whatever a permitted document goes on to
+-- reference: an image outside it is refused like any other access, and since
+-- libhtmldoc just leaves out what it can't load, pg_htmldoc says so with a
+-- WARNING naming it rather than silently handing back a document missing it.
+-- The image needn't exist: the refusal comes before libhtmldoc looks for it.
+--
+COPY (SELECT '<html><body><p>page</p><img src="/tmp/pg_htmldoc_test_not_whitelisted.png"></body></html>') TO '/tmp/pg_htmldoc_test_img.html';
+SELECT set_config('pg_htmldoc.whitelist', 'file:///tmp/pg_htmldoc_test_img.html', false);
+
+SELECT htmldoc_addfile('/tmp/pg_htmldoc_test_img.html');
+SELECT octet_length(convert2pdf()) > 100 AS whitelist_refused_image_pdf_nonempty;
 
 --
 -- A file:// entry with a trailing slash permits anything under that

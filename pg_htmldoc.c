@@ -26,11 +26,16 @@ static void require_superuser(const char *action) {
 }
 
 static bool cleanup = false;
-/* Set by fileCallbackFunction() to whatever it last refused; empty when it has
- * refused nothing since read_fileurl() cleared it. Sized like the URL and
- * filename buffers libhtmldoc itself uses, so a longer one was already
- * truncated before it got here. */
-static char denied_url[1024] = "";
+/* What fileCallbackFunction() refused since the last refused_reset(), for
+ * read_fileurl() to name in its error and refused_warn() to report as left
+ * out. Fixed static buffers rather than palloc'd ones, so recording a refusal
+ * from inside libhtmldoc can't fail, and a transaction aborted mid-render
+ * can't leave them dangling. Each is sized like the URL and filename buffers
+ * libhtmldoc itself uses, so a longer one was already truncated before it got
+ * here; distinct refusals past the last slot are only counted. */
+#define REFUSED_MAX 8
+static char refused[REFUSED_MAX][1024];
+static int nrefused = 0, nrefused_more = 0;
 static bool privileged = false;
 static tree_t *document = NULL;
 
@@ -52,6 +57,26 @@ static tree_t *document = NULL;
  * error rather than a silent miscompile. */
 typedef tree_t *(*htmlReadFile_fn)(tree_t *parent, FILE *fp, const char *base);
 static htmlReadFile_fn real_htmlReadFile = NULL;
+
+static void refused_reset(void) {
+    nrefused = nrefused_more = 0;
+}
+
+static void refused_add(const char *url) {
+    int i;
+    for (i = 0; i < nrefused; i++) if (!strcmp(refused[i], url)) return;
+    if (nrefused < REFUSED_MAX) strlcpy(refused[nrefused++], url, sizeof(refused[0])); else nrefused_more++;
+}
+
+/* libhtmldoc leaves out whatever it can't load -- an image the whitelist
+ * refused included -- and says so only in the server log. Tell the caller
+ * instead, once the library call that loaded the document has returned. */
+static void refused_warn(void) {
+    int i;
+    for (i = 0; i < nrefused; i++) ereport(WARNING, (errmsg("permission denied to access \"%s\"", refused[i]), errdetail("whitelist does not permit this file or URL for the current role, so it was left out of the document.")));
+    if (nrefused_more) ereport(WARNING, (errmsg("permission denied to access %d more files or URLs", nrefused_more), errdetail("They were left out of the document too.")));
+    refused_reset();
+}
 
 /* read_fileurl()'s whitelist checks only cover the one file/URL named in the
  * function argument. Everything a document goes on to reference -- <img>,
@@ -85,8 +110,8 @@ static int fileCallbackFunction(void *data, hd_file_event_t event, const char *u
     }
     /* Record what was refused, so read_fileurl() can name it rather than the
      * argument it started from -- which, after a redirect, is a URL that is
-     * itself permitted. Only ever set here; read_fileurl() clears it. */
-    if (!allowed) strlcpy(denied_url, url, sizeof(denied_url));
+     * itself permitted -- and refused_warn() can report what a document lost. */
+    if (!allowed) refused_add(url);
     return allowed ? 1 : 0;
 }
 
@@ -117,12 +142,12 @@ static void read_fileurl(tree_t **document, const char *fileurl, const char *pat
     tree_t *file;
     pg_whitelist_check_url(fileurl, privileged);
     base = file_directory(fileurl);
-    denied_url[0] = '\0';
+    refused_reset();
     realname = file_find(path, fileurl);
     if (!base) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_directory(\"%s\")", fileurl)));
     /* file_find() reports a refusal from fileCallbackFunction() the same way it
      * reports a missing file, and the refusal is the more useful of the two. */
-    if (!realname && denied_url[0]) pg_whitelist_deny(denied_url);
+    if (!realname && nrefused) pg_whitelist_deny(refused[nrefused - 1]);
     if (!realname) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!file_find(\"%s\", \"%s\")", path, fileurl)));
     pg_whitelist_check_local(fileurl, realname, privileged);
     _htmlPPI = 72.0f * _htmlBrowserWidth / (PageWidth - PageLeft - PageRight);
@@ -146,6 +171,7 @@ static void read_fileurl(tree_t **document, const char *fileurl, const char *pat
     if (!(in = fopen(realname, "rb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", realname)));
     real_htmlReadFile(file, in, base);
     fclose(in);
+    refused_warn();
 }
 
 static void read_html(tree_t **document, const char *html, size_t len) {
@@ -169,8 +195,10 @@ static void read_html(tree_t **document, const char *html, size_t len) {
     htmlSetVariable(file, (uchar *)"_HD_FILENAME", (uchar *)"html");
     htmlSetVariable(file, (uchar *)"_HD_BASE", (uchar *)".");
     if (!(in = fmemopen((void *)html, len, "rb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fmemopen")));
+    refused_reset();
     real_htmlReadFile(file, in, ".");
     fclose(in);
+    refused_warn();
 }
 
 static Datum htmldoc(PG_FUNCTION_ARGS) {
@@ -192,6 +220,7 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
             if (!(out = fopen(file, "wb"))) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("!fopen(\"%s\")", file)));
         } break;
     }
+    refused_reset();
     if (pspdf_export_out(document, NULL, out)) {
         /* pspdf_export_out() only closes out once it has written the document;
          * its error returns happen before that, so out is still open here --
@@ -202,6 +231,7 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
         if (file) unlink(file);
         ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("pspdf_export_out failed")));
     }
+    refused_warn();
     if (file) pfree(file);
     htmlDeleteTree(document);
     file_cleanup();
