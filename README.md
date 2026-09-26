@@ -48,7 +48,7 @@ select convert2pdf('/srv/reports/report.pdf');
 | --- | --- | --- |
 | `htmldoc_addfile(file text)` | `bool` | Queue a local file (HTML or Markdown), resolved relative to the server's working directory. |
 | `htmldoc_addurl(url text)` | `bool` | Queue a web page, fetched over `http://`/`https://`. |
-| `htmldoc_addhtml(html text)` | `bool` | Queue an in-memory HTML/Markdown fragment. Always requires superuser -- any local files or URLs referenced from its markup (`img`/`body`/`embed`) are resolved deep inside HTMLDOC's rendering pipeline, where there's no single file/URL `pg_htmldoc.whitelist` can check against. |
+| `htmldoc_addhtml(html text)` | `bool` | Queue an in-memory HTML/Markdown fragment. Always requires superuser -- its markup comes straight from the caller, with no file/URL for `pg_htmldoc.whitelist` to grant. |
 | `convert2pdf()` / `convert2ps()` | `bytea` | Render everything queued so far as PDF/PostScript and return it directly. |
 | `convert2pdf(file text)` / `convert2ps(file text)` | `bool` | Render and write the result to `file` on the server instead of returning it. Always requires superuser, since it writes to the server's filesystem. |
 
@@ -59,7 +59,7 @@ Every `add*` call requires its argument to be non-`NULL`, and every `convert2*` 
 | Caller | `htmldoc_addfile()` / `htmldoc_addurl()` | `htmldoc_addhtml()` | `convert2pdf()` / `convert2ps()` (bytea) | `convert2pdf(file)` / `convert2ps(file)` |
 | --- | --- | --- | --- | --- |
 | Superuser | Allowed (narrowed by `pg_htmldoc.whitelist` if set) | Allowed | Allowed | Allowed |
-| Non-superuser | Allowed only if `pg_htmldoc.whitelist` explicitly grants the specific file/URL | Denied | Allowed (no filesystem access involved) | Denied |
+| Non-superuser | Allowed only if `pg_htmldoc.whitelist` explicitly grants the specific file/URL | Denied | Allowed (the result is returned, not written to the server) | Denied |
 
 `pg_htmldoc.whitelist` is a `PGC_SUSET` GUC -- settable only by a superuser, including via `ALTER ROLE ... SET`, so a role can never loosen its own scope with a plain `SET` -- holding a comma-separated list of `file://` and `http(s)://` prefixes:
 
@@ -70,6 +70,16 @@ alter role reporting set pg_htmldoc.whitelist = 'file:///srv/reports/,https://ex
 - For a superuser, a non-empty whitelist *narrows* access: only matching files/URLs are allowed.
 - For a non-superuser, a non-empty whitelist is their *sole* grant: only matching files/URLs are allowed, everything else is denied.
 - An empty/unset whitelist means unrestricted access for a superuser, but denies everything for a non-superuser.
+
+Entries are separated by commas, with surrounding whitespace ignored, and matched as follows:
+
+- `file:///dir/` (trailing slash) allows anything under that directory; `file:///dir/file` allows only that one file. The path being accessed is resolved with `realpath()` first, so `..` or a symlink can't lead out of an allowed directory. A directory entry itself is compared as written, so give its real path rather than one through a symlink.
+- `http://` and `https://` entries allow any URL starting with them. Without a trailing slash, the match must end at `/`, `?`, `#` or the end of the URL: `https://example.com` doesn't allow `https://example.com.evil.net/`, and `https://example.com/api` doesn't allow `https://example.com/api2`. For an entry naming just a host, a URL with an `@` before its first `/` is refused, since the part before the `@` would be taken as a user name rather than the host.
+- The scheme and port must match: an `https://` entry doesn't allow `http://`, and a URL on a non-default port needs an entry naming that port. A default port (`:443` for `https`, `:80` for `http`) may be written or left out on either side.
+- Hosts are compared exactly as written, so spell them the same way the documents do (normally lowercase).
+- A scheme-relative `//host/...` URL never matches, since every entry names its scheme.
+
+The whitelist covers everything a document goes on to reference, not just the file/URL passed to `htmldoc_addfile()`/`htmldoc_addurl()`: images, `<body background>` and any other file or URL HTMLDOC loads, and every hop of an HTTP redirect, are checked the same way, before any file is opened or any host is contacted. This holds for `htmldoc_addhtml()` markup too, and for images fetched later, during `convert2pdf()`/`convert2ps()` -- judged by the role calling that function. A refusal while resolving the argument itself, including any redirect it leads to, raises `permission denied` naming the file/URL that was actually refused; a refused image is silently left out of the output.
 
 ### License
 
