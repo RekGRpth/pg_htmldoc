@@ -144,7 +144,13 @@ static Datum htmldoc(PG_FUNCTION_ARGS) {
             pfree(file);
         } break;
     }
-    if (pspdf_export_out(document, NULL, out)) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("pspdf_export_out failed")));
+    if (pspdf_export_out(document, NULL, out)) {
+        /* pspdf_export_out() only closes out once it has written the document;
+         * its error returns happen before that, so out is still open here. */
+        fclose(out);
+        free(output_data);
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("pspdf_export_out failed")));
+    }
     htmlDeleteTree(document);
     file_cleanup();
     image_flush_cache();
